@@ -26,7 +26,7 @@ $HashesByLength = @{
 $ChecksumTokenPattern = "(?<![0-9a-fA-F])([0-9a-fA-F]{128}|[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})(?![0-9a-fA-F])"
 $MaxChecksumFileSize = 1024 * 1024
 
-function Normalize-Checksum {
+function ConvertTo-NormalizedChecksum {
     param([string]$Value)
 
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -36,7 +36,7 @@ function Normalize-Checksum {
     return $Value.Trim().ToLowerInvariant()
 }
 
-function Normalize-Algorithm {
+function ConvertTo-NormalizedAlgorithm {
     param([string]$Value)
 
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -133,7 +133,7 @@ function Get-ChecksumFilename {
     return $filename.Trim().Trim([char]'"')
 }
 
-function Parse-ChecksumLine {
+function ConvertFrom-ChecksumLine {
     param(
         [string]$Line,
         [int]$LineNumber
@@ -196,7 +196,7 @@ function Read-ChecksumFile {
 
     foreach ($line in [System.IO.File]::ReadLines($resolvedChecksumPath)) {
         $lineNumber += 1
-        $candidate = Parse-ChecksumLine -Line $line -LineNumber $lineNumber
+        $candidate = ConvertFrom-ChecksumLine -Line $line -LineNumber $lineNumber
         if ($null -eq $candidate) {
             continue
         }
@@ -247,7 +247,7 @@ try {
         throw "Use either -Expected or -ChecksumFile, not both."
     }
 
-    $normalizedAlgorithm = Normalize-Algorithm -Value $Algorithm
+    $normalizedAlgorithm = ConvertTo-NormalizedAlgorithm -Value $Algorithm
     $resolvedFile = Resolve-InputFile -Path $File -Description "file"
 
     $expectedChecksum = ""
@@ -267,7 +267,7 @@ try {
             $checksumSource = "$checksumSource ($($parsedChecksum.Filename))"
         }
     } elseif ($hasExpected) {
-        $expectedChecksum = Normalize-Checksum -Value $Expected
+        $expectedChecksum = ConvertTo-NormalizedChecksum -Value $Expected
         if ([string]::IsNullOrWhiteSpace($hashAlgorithm)) {
             $hashAlgorithm = Get-AlgorithmFromChecksum -Checksum $expectedChecksum
         }
