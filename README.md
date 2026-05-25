@@ -1,16 +1,26 @@
 # ISO Integrity Check
 
-A simple Windows-friendly desktop tool for checking ISO file integrity with trusted checksums.
+A simple Windows-friendly tool for checking ISO file integrity with trusted checksums.
 
 ![ISO Integrity Check screenshot](docs/screenshot.png)
 
-## Run
+## Run The GUI
 
 ```powershell
 python main.py
 ```
 
 No external Python packages are required. The app uses Python's built-in Tkinter GUI toolkit and standard hashing library.
+
+## Run Without Python
+
+A separate command-line version is available in the `CLI` folder for users who do not have Python installed. It runs through Windows PowerShell and uses the built-in `Get-FileHash` command.
+
+```powershell
+.\CLI\iso-integrity-check.cmd -File "C:\Downloads\example.iso" -ChecksumFile "C:\Downloads\SHA256SUMS"
+```
+
+See `CLI\README.md` for terminal examples, supported arguments, and exit codes.
 
 ## Supported Hashes
 
@@ -23,7 +33,7 @@ SHA1 and MD5 are included for older ISO sources, but they are not considered str
 
 ## Supported Checksum Files
 
-The checksum import button supports common checksum files such as:
+The GUI checksum import button and the separate CLI support common checksum files such as:
 
 - `.sha256`
 - `.sha512`

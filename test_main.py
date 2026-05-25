@@ -1,4 +1,6 @@
 import hashlib
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,10 @@ from main import (
     validate_expected_checksum,
     verify_checksum,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent
+CLI_SCRIPT = REPO_ROOT / "CLI" / "iso-integrity-check.ps1"
+POWERSHELL = shutil.which("powershell.exe") or shutil.which("powershell")
 
 
 class HashVerificationTests(unittest.TestCase):
@@ -208,6 +214,104 @@ class ChecksumFileParsingTests(unittest.TestCase):
 
         self.assertEqual(result.status, "mismatch")
         self.assertFalse(result.matches)
+
+
+@unittest.skipIf(POWERSHELL is None, "Windows PowerShell is not available")
+class PowerShellCliTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.file_path = Path(self.temp_dir.name) / "sample.iso"
+        self.file_path.write_bytes(b"iso integrity test data")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def run_cli(self, *args):
+        command = [
+            POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(CLI_SCRIPT),
+            *[str(arg) for arg in args],
+        ]
+        return subprocess.run(command, capture_output=True, text=True)
+
+    def test_cli_direct_checksum_match_with_inferred_algorithm(self):
+        checksum = hashlib.sha256(self.file_path.read_bytes()).hexdigest()
+
+        completed = self.run_cli("-File", self.file_path, "-Expected", checksum)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("MATCH", completed.stdout)
+        self.assertIn(checksum, completed.stdout)
+
+    def test_cli_direct_checksum_mismatch_exits_with_one(self):
+        completed = self.run_cli("-File", self.file_path, "-Algorithm", "SHA256", "-Expected", "0" * 64)
+
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("MISMATCH", completed.stdout)
+
+    def test_cli_hash_only_outputs_selected_algorithm_hash(self):
+        checksum = hashlib.md5(self.file_path.read_bytes()).hexdigest()
+
+        completed = self.run_cli("-File", self.file_path, "-Algorithm", "MD5")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Algorithm: MD5", completed.stdout)
+        self.assertIn(checksum, completed.stdout)
+        self.assertIn("Checksum calculated", completed.stdout)
+
+    def test_cli_checksum_file_prefers_matching_filename(self):
+        matching_checksum = hashlib.sha256(self.file_path.read_bytes()).hexdigest()
+        checksum_file = Path(self.temp_dir.name) / "SHA256SUMS"
+        checksum_file.write_text(f"{'0' * 64}  other.iso\n{matching_checksum}  sample.iso\n", encoding="utf-8")
+
+        completed = self.run_cli("-File", self.file_path, "-ChecksumFile", checksum_file)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("MATCH", completed.stdout)
+        self.assertIn("sample.iso", completed.stdout)
+
+    def test_cli_parses_bsd_style_checksum_file(self):
+        checksum = hashlib.sha512(self.file_path.read_bytes()).hexdigest()
+        checksum_file = Path(self.temp_dir.name) / "sample.sha512"
+        checksum_file.write_text(f"SHA512 (sample.iso) = {checksum}\n", encoding="utf-8")
+
+        completed = self.run_cli("-File", self.file_path, "-ChecksumFile", checksum_file)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Algorithm: SHA512", completed.stdout)
+        self.assertIn("MATCH", completed.stdout)
+
+    def test_cli_rejects_invalid_checksum_length_and_characters(self):
+        cases = [
+            (["-File", self.file_path, "-Algorithm", "SHA256", "-Expected", "abc"], "64 hexadecimal characters"),
+            (["-File", self.file_path, "-Algorithm", "SHA256", "-Expected", "g" * 64], "hexadecimal"),
+        ]
+
+        for args, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                completed = self.run_cli(*args)
+
+                self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+                self.assertIn(expected_message, completed.stderr)
+
+    def test_cli_reports_missing_iso_and_checksum_files(self):
+        missing_iso = Path(self.temp_dir.name) / "missing.iso"
+        missing_checksum = Path(self.temp_dir.name) / "missing.sha256"
+        cases = [
+            (["-File", missing_iso, "-Algorithm", "SHA256", "-Expected", "0" * 64], "does not exist"),
+            (["-File", self.file_path, "-ChecksumFile", missing_checksum], "checksum file"),
+        ]
+
+        for args, expected_message in cases:
+            with self.subTest(expected_message=expected_message):
+                completed = self.run_cli(*args)
+
+                self.assertEqual(completed.returncode, 2, completed.stdout + completed.stderr)
+                self.assertIn(expected_message, completed.stderr)
 
 
 if __name__ == "__main__":
