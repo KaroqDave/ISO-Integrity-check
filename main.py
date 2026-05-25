@@ -4,6 +4,7 @@ import hashlib
 import queue
 import re
 import threading
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import (
@@ -34,6 +35,7 @@ HASHES_BY_LENGTH = {
 HEX_PATTERN = re.compile(r"^[0-9a-f]+$")
 CHECKSUM_TOKEN_PATTERN = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{128}|[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})(?![0-9a-fA-F])")
 CHUNK_SIZE = 4 * 1024 * 1024
+MAX_CHECKSUM_FILE_SIZE = 1024 * 1024
 APP_AUTHOR = "KaroqDave"
 APP_PROFILE_URL = "https://github.com/KaroqDave"
 
@@ -84,7 +86,7 @@ def calculate_file_hash(
     file_path: str | Path,
     algorithm: str,
     chunk_size: int = CHUNK_SIZE,
-    progress_callback: callable | None = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> str:
     if algorithm not in SUPPORTED_HASHES:
         raise ValueError(f"Unsupported hash algorithm: {algorithm}")
@@ -125,33 +127,51 @@ def parse_checksum_line(line: str, line_number: int) -> ParsedChecksum | None:
 
 
 def parse_checksum_text(text: str, iso_path: str | Path | None = None) -> ParsedChecksum:
-    candidates = [
-        parsed
-        for line_number, line in enumerate(text.splitlines(), start=1)
-        if (parsed := parse_checksum_line(line, line_number)) is not None
-    ]
+    return parse_checksum_lines(text.splitlines(), iso_path=iso_path)
 
-    if not candidates:
-        raise ValueError("No supported checksum was found in the selected file.")
 
+def parse_checksum_lines(lines: Iterable[str], iso_path: str | Path | None = None) -> ParsedChecksum:
     iso_name = Path(iso_path).name.lower() if iso_path else ""
-    if iso_name:
-        for candidate in candidates:
-            if _checksum_candidate_matches_iso(candidate, iso_name):
-                return candidate
+    first_candidate: ParsedChecksum | None = None
 
-    return candidates[0]
+    for line_number, line in enumerate(lines, start=1):
+        parsed = parse_checksum_line(line, line_number)
+        if parsed is None:
+            continue
+
+        if first_candidate is None:
+            first_candidate = parsed
+
+        if not iso_name:
+            return parsed
+
+        if _checksum_candidate_matches_iso(parsed, iso_name):
+            return parsed
+
+    if first_candidate is not None:
+        return first_candidate
+
+    raise ValueError("No supported checksum was found in the selected file.")
 
 
-def load_checksum_file(checksum_file_path: str | Path, iso_path: str | Path | None = None) -> ParsedChecksum:
+def load_checksum_file(
+    checksum_file_path: str | Path,
+    iso_path: str | Path | None = None,
+    max_size: int = MAX_CHECKSUM_FILE_SIZE,
+) -> ParsedChecksum:
     path = Path(checksum_file_path)
     if not path.exists():
         raise ValueError("The selected checksum file does not exist.")
     if not path.is_file():
         raise ValueError("The selected checksum path is not a file.")
+    if path.stat().st_size > max_size:
+        raise ValueError(
+            "The selected checksum file is too large. Choose a checksum text file under "
+            f"{max_size // 1024} KB."
+        )
 
-    text = path.read_text(encoding="utf-8-sig", errors="replace")
-    return parse_checksum_text(text, iso_path=iso_path)
+    with path.open("r", encoding="utf-8-sig", errors="replace") as checksum_file:
+        return parse_checksum_lines(checksum_file, iso_path=iso_path)
 
 
 def verify_checksum(file_path: str | Path, expected_checksum: str, algorithm: str) -> VerificationResult:
@@ -203,6 +223,10 @@ def _extract_checksum_filename(line: str, token_start: int, token_end: int) -> s
     before = line[:token_start].strip()
     after = line[token_end:].strip()
 
+    bsd_match = re.fullmatch(r"[A-Za-z0-9-]+\s*\((.+)\)\s*=", before)
+    if bsd_match:
+        return bsd_match.group(1).strip().strip('"')
+
     filename = after or before
     if not filename:
         return ""
@@ -217,8 +241,11 @@ def _extract_checksum_filename(line: str, token_start: int, token_end: int) -> s
 
 
 def _checksum_candidate_matches_iso(candidate: ParsedChecksum, iso_name: str) -> bool:
+    if not candidate.filename:
+        return False
+
     filename = candidate.filename.replace("\\", "/").split("/")[-1].lower()
-    return filename == iso_name or iso_name in candidate.raw_line.lower()
+    return filename == iso_name
 
 
 class ISOIntegrityApp:

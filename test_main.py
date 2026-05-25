@@ -121,6 +121,26 @@ class ChecksumFileParsingTests(unittest.TestCase):
         self.assertEqual(parsed.checksum, matching_hash)
         self.assertEqual(parsed.filename, "sample.iso")
 
+    def test_exact_iso_filename_wins_over_partial_filename_match(self):
+        wrong_file_hash = "0" * 64
+        matching_hash = hashlib.sha256(self.iso_path.read_bytes()).hexdigest()
+        text = f"{wrong_file_hash}  sample.iso.zsync\n{matching_hash}  sample.iso\n"
+
+        parsed = parse_checksum_text(text, iso_path=self.iso_path)
+
+        self.assertEqual(parsed.checksum, matching_hash)
+        self.assertEqual(parsed.filename, "sample.iso")
+
+    def test_raw_line_mentions_do_not_count_as_filename_matches(self):
+        wrong_file_hash = "0" * 64
+        matching_hash = hashlib.sha256(self.iso_path.read_bytes()).hexdigest()
+        text = f"{wrong_file_hash}  other.iso # sample.iso\n{matching_hash}  sample.iso\n"
+
+        parsed = parse_checksum_text(text, iso_path=self.iso_path)
+
+        self.assertEqual(parsed.checksum, matching_hash)
+        self.assertEqual(parsed.filename, "sample.iso")
+
     def test_first_supported_hash_is_used_without_filename_match(self):
         first_hash = "1" * 40
         second_hash = "2" * 64
@@ -144,6 +164,33 @@ class ChecksumFileParsingTests(unittest.TestCase):
 
         self.assertEqual(parsed.algorithm, "SHA1")
         self.assertEqual(parsed.checksum, checksum)
+
+    def test_load_checksum_file_rejects_oversized_files(self):
+        checksum_file = Path(self.temp_dir.name) / "large.sha256"
+        checksum_file.write_text("0" * 64, encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "too large"):
+            load_checksum_file(checksum_file, iso_path=self.iso_path, max_size=32)
+
+    def test_bsd_style_line_with_filename_is_parsed(self):
+        checksum = hashlib.sha256(self.iso_path.read_bytes()).hexdigest()
+
+        parsed = parse_checksum_text(f"SHA256 (sample.iso) = {checksum}", iso_path=self.iso_path)
+
+        self.assertEqual(parsed.algorithm, "SHA256")
+        self.assertEqual(parsed.checksum, checksum)
+        self.assertEqual(parsed.filename, "sample.iso")
+
+    def test_matching_bsd_style_filename_wins_over_first_supported_hash(self):
+        wrong_file_hash = "0" * 64
+        matching_hash = hashlib.sha512(self.iso_path.read_bytes()).hexdigest()
+        text = f"SHA256 (other.iso) = {wrong_file_hash}\nSHA512 (sample.iso) = {matching_hash}\n"
+
+        parsed = parse_checksum_text(text, iso_path=self.iso_path)
+
+        self.assertEqual(parsed.algorithm, "SHA512")
+        self.assertEqual(parsed.checksum, matching_hash)
+        self.assertEqual(parsed.filename, "sample.iso")
 
     def test_parsed_checksum_can_verify_a_match(self):
         checksum = hashlib.sha256(self.iso_path.read_bytes()).hexdigest()

@@ -41,6 +41,8 @@ f2ca1bb6c7e907d06dafe4687e579fce *example.iso
 
 If the checksum file contains multiple entries, the app prefers the line matching the selected ISO filename. If no filename matches, it uses the first supported checksum it finds.
 
+Checksum import is intended for small text checksum files. Files larger than 1 MB are rejected to keep the desktop UI responsive.
+
 ## How To Use
 
 1. Click **Browse...** and select an `.iso` file.
