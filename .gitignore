@@ -10,6 +10,7 @@ compile_flags.txt
 
 # C++ / CMake build output
 build/
+build-linux/
 out/
 standalone/
 CMakeFiles/
@@ -34,3 +35,8 @@ Testing/
 # Binaries
 *.exe
 *.dll
+
+# Linux AppImage packaging
+AppDir/
+*.AppImage
+.tools/

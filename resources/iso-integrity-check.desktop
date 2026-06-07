@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ISO Integrity Check
+Comment=Verify ISO file integrity with trusted checksums
+Exec=iso-integrity-check
+Icon=iso-integrity-check
+Categories=Utility;Security;
+Terminal=false

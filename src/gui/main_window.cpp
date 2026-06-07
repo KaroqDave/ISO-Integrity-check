@@ -108,6 +108,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(820, 600);
     buildUi();
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (auto* hints = QApplication::styleHints()) {
         connect(hints, &QStyleHints::colorSchemeChanged, this, [this]() {
             if (currentTheme == iso::Theme::System) {
@@ -115,6 +116,7 @@ MainWindow::MainWindow(QWidget* parent)
             }
         });
     }
+#endif
 }
 
 void MainWindow::buildUi()

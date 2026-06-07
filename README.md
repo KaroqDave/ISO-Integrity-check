@@ -2,17 +2,17 @@
 
 [![Build](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml/badge.svg)](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml)
 
-A Windows desktop app for checking ISO file integrity with trusted checksums.
+A cross-platform desktop app for checking ISO file integrity with trusted checksums.
 
-The primary implementation is now a C++/Qt app that builds to a native `.exe`. The older Python GUI and PowerShell CLI remain available under `legacy/`, but they are no longer the main development target.
+The primary implementation is a C++/Qt 6 GUI. The older Python GUI and PowerShell CLI remain available under `legacy/`, but they are no longer the main development target.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
-> **Platform:** ISO Integrity Check is a Windows desktop application (MSVC + Qt 6, deployed with `windeployqt`). The core hashing keeps a portable `QCryptographicHash` fallback so the logic compiles elsewhere, but the packaged GUI targets Windows.
-
 ## Download (Ready To Run)
 
-Grab the latest standalone build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases):
+Grab the latest build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases):
+
+### Windows
 
 1. Download `ISO-Integrity-Check-<version>.zip`.
 2. Extract it anywhere.
@@ -20,13 +20,33 @@ Grab the latest standalone build from the [Releases page](https://github.com/Kar
 
 Keep the DLLs and plugin folders next to the executable. If Windows reports missing runtime DLLs, install the latest [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
+### Linux (AppImage)
+
+1. Download `ISO-Integrity-Check-<version>-x86_64.AppImage`.
+2. Make it executable and run it:
+
+```bash
+chmod +x ISO-Integrity-Check-*-x86_64.AppImage
+./ISO-Integrity-Check-*-x86_64.AppImage
+```
+
+The AppImage works on Ubuntu 22.04+, Fedora, Arch, and other recent x86_64 distros. On systems without FUSE2 (some Ubuntu 24.04+ setups), install `libfuse2` or extract and run manually:
+
+```bash
+./ISO-Integrity-Check-*-x86_64.AppImage --appimage-extract
+./squashfs-root/AppRun
+```
+
 ## Build The C++ App
 
 Prerequisites:
 
-- Visual Studio 2022 with the MSVC C++ toolchain.
 - CMake 3.21 or newer.
 - Qt 6 with the `Core` and `Widgets` components.
+
+### Windows
+
+- Visual Studio 2022 with the MSVC C++ toolchain.
 
 Configure and build:
 
@@ -43,7 +63,28 @@ build\Release\iso-integrity-check.exe
 
 The build runs `windeployqt` after compiling the GUI, so Qt runtime DLLs and plugins are copied beside the executable. Adjust `CMAKE_PREFIX_PATH` if your Qt version or kit path changes.
 
+### Linux
+
+Install development packages for your distro:
+
+| Distro | Packages |
+|--------|----------|
+| Ubuntu/Debian | `qt6-base-dev`, `cmake`, `g++`, `libgl1-mesa-dev`, `libxkbcommon-dev` |
+| Fedora | `qt6-qtbase-devel`, `cmake`, `gcc-c++`, `mesa-libGL-devel`, `libxkbcommon-devel` |
+| Arch | `qt6-base`, `cmake`, `gcc`, `mesa`, `libxkbcommon` |
+
+Configure and build:
+
+```bash
+cmake -S . -B build-linux -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 -DCMAKE_BUILD_TYPE=Release
+cmake --build build-linux --config Release --target iso-integrity-check
+```
+
+The executable is produced at `build-linux/iso-integrity-check`.
+
 ## Standalone Build (Export For Distribution)
+
+### Windows
 
 To produce a clean, self-contained folder (and a zip ready for a release), run:
 
@@ -53,9 +94,26 @@ To produce a clean, self-contained folder (and a zip ready for a release), run:
 
 This builds the Release executable, exports it together with the full Qt runtime to `standalone/ISO-Integrity-Check`, and creates `standalone/ISO-Integrity-Check-<version>.zip`. The `standalone/` folder is regenerated on each run and is not tracked in git.
 
+### Linux
+
+To produce a portable AppImage, run:
+
+```bash
+./scripts/build-appimage.sh
+```
+
+Set `CMAKE_PREFIX_PATH` if Qt is not found automatically:
+
+```bash
+CMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 ./scripts/build-appimage.sh
+```
+
+This creates `standalone/ISO-Integrity-Check-<version>-x86_64.AppImage`.
+The script uses `build-linux/` by default so it does not reuse or overwrite a Windows CMake cache in `build/`.
+
 ## Performance
 
-Hashing uses the Windows CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it, and overlaps file reading with hashing for large ISO files. On other platforms it falls back to Qt's `QCryptographicHash`.
+On Windows, hashing uses the CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it, and overlaps file reading with hashing for large ISO files. On Linux, hashing uses Qt's `QCryptographicHash`.
 
 ## Supported Hashes
 
@@ -108,4 +166,10 @@ Run the legacy Python tests with:
 
 ```powershell
 python -m unittest discover -s legacy\python
+```
+
+On Linux:
+
+```bash
+python -m unittest discover -s legacy/python
 ```

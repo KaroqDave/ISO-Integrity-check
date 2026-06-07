@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ISOIntegrityCheck VERSION 1.0.2 LANGUAGES CXX RC)
+if(WIN32)
+    project(ISOIntegrityCheck VERSION 1.1.0 LANGUAGES CXX RC)
+else()
+    project(ISOIntegrityCheck VERSION 1.1.0 LANGUAGES CXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +17,7 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
 get_filename_component(QT_INSTALL_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
 
-add_executable(iso-integrity-check WIN32
+set(ISO_INTEGRITY_CHECK_SOURCES
     src/core/checksum.cpp
     src/core/checksum.h
     src/core/verifier.cpp
@@ -25,6 +29,13 @@ add_executable(iso-integrity-check WIN32
     src/gui/theme.h
     resources/resources.qrc
 )
+
+if(WIN32)
+    add_executable(iso-integrity-check WIN32 ${ISO_INTEGRITY_CHECK_SOURCES})
+else()
+    add_executable(iso-integrity-check ${ISO_INTEGRITY_CHECK_SOURCES})
+endif()
+
 target_include_directories(iso-integrity-check PRIVATE src)
 target_link_libraries(iso-integrity-check PRIVATE Qt6::Core Qt6::Widgets)
 
@@ -46,15 +57,20 @@ if(WIN32)
     endif()
 endif()
 
-# Install rules: place the executable at the install root and deploy the Qt
-# runtime next to it, producing a clean, self-contained bundle. Used by
-# scripts/build-standalone.ps1 to populate the standalone export folder via
-# `cmake --install <build> --config Release --prefix <dir>`.
-install(TARGETS iso-integrity-check RUNTIME DESTINATION ".")
-if(WIN32 AND WINDEPLOYQT_EXECUTABLE)
-    install(CODE "
-        execute_process(COMMAND \"${WINDEPLOYQT_EXECUTABLE}\"
-            --no-translations --no-compiler-runtime
-            \"\${CMAKE_INSTALL_PREFIX}/iso-integrity-check.exe\")
-    ")
+# Install rules used by scripts/build-standalone.ps1 (Windows) and
+# scripts/build-appimage.sh (Linux) via `cmake --install`.
+if(WIN32)
+    install(TARGETS iso-integrity-check RUNTIME DESTINATION ".")
+    if(WINDEPLOYQT_EXECUTABLE)
+        install(CODE "
+            execute_process(COMMAND \"${WINDEPLOYQT_EXECUTABLE}\"
+                --no-translations --no-compiler-runtime
+                \"\${CMAKE_INSTALL_PREFIX}/iso-integrity-check.exe\")
+        ")
+    endif()
+else()
+    install(TARGETS iso-integrity-check RUNTIME DESTINATION bin)
+    install(FILES resources/iso-integrity-check.desktop DESTINATION share/applications)
+    install(FILES resources/icons/app.svg DESTINATION share/icons/hicolor/scalable/apps
+            RENAME iso-integrity-check.svg)
 endif()

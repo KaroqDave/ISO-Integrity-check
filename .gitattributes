@@ -17,6 +17,10 @@
 *.cmd text eol=crlf
 *.bat text eol=crlf
 
+# Unix shell scripts must stay LF.
+*.sh text eol=lf
+*.desktop text eol=lf
+
 # Binary assets must never be normalized.
 *.png binary
 *.ico binary
