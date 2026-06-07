@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ISOIntegrityCheck VERSION 1.0.1 LANGUAGES CXX)
+project(ISOIntegrityCheck VERSION 1.0.1 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +31,7 @@ target_link_libraries(iso-integrity-check PRIVATE Qt6::Core Qt6::Widgets)
 if(WIN32)
     # Hardware-accelerated hashing via the Windows CNG (BCrypt) API.
     target_link_libraries(iso-integrity-check PRIVATE bcrypt)
+    target_sources(iso-integrity-check PRIVATE resources/app.rc)
 endif()
 
 if(WIN32)

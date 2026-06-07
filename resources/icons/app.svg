@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Rounded square background (accent blue) -->
+  <rect width="512" height="512" rx="96" fill="#2563eb"/>
+  <!-- Optical disc ring -->
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#ffffff" stroke-width="36"/>
+  <!-- Center hole -->
+  <circle cx="256" cy="256" r="44" fill="#2563eb"/>
+  <!-- Verification checkmark badge -->
+  <circle cx="368" cy="368" r="72" fill="#15803d"/>
+  <path d="M 332 368 L 356 392 L 404 344" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
