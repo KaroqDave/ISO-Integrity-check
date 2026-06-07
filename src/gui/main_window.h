@@ -6,10 +6,12 @@
 #include <QMainWindow>
 
 class QComboBox;
+class QLayout;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QLabel;
+class QWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -19,6 +21,13 @@ public:
 
 private:
     void buildUi();
+    QLayout* buildHeaderLayout();
+    QWidget* buildFileSection();
+    QWidget* buildInputSection();
+    QLayout* buildActionLayout();
+    QWidget* buildResultSection();
+    QWidget* buildComputedSection();
+    QWidget* buildFooterWarning();
     void browseIsoFile();
     void browseChecksumFile();
     void startVerification();

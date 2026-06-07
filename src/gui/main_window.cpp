@@ -60,6 +60,45 @@ QString themeButtonText(iso::Theme theme)
     return QStringLiteral("Theme");
 }
 
+QLabel* fieldLabel(const QString& text)
+{
+    auto* label = new QLabel(text);
+    label->setObjectName(QStringLiteral("fieldLabel"));
+    return label;
+}
+
+QPushButton* styledButton(const QString& text, const char* variant)
+{
+    auto* button = new QPushButton(text);
+    button->setProperty("variant", variant);
+    button->setCursor(Qt::PointingHandCursor);
+    return button;
+}
+
+void setupAlgorithmCombo(QComboBox* combo)
+{
+    combo->addItems(iso::supportedHashNames());
+    combo->setCursor(Qt::PointingHandCursor);
+    auto* algorithmView = new QListView(combo);
+    algorithmView->setFrameShape(QFrame::NoFrame);
+    combo->setView(algorithmView);
+    // Force a uniform popup row height; the list view ignores the stylesheet's
+    // min-height when laying out rows, so set it explicitly via the size hint.
+    for (int i = 0; i < combo->count(); ++i) {
+        combo->setItemData(i, QSize(0, 32), Qt::SizeHintRole);
+    }
+    if (QWidget* popup = algorithmView->parentWidget()) {
+        // The popup is a top-level window; make only this container transparent and
+        // shadow-free so the rounded item view has no square corner artifacts behind
+        // it. The rule is scoped by objectName so it does not affect the child view.
+        popup->setObjectName(QStringLiteral("comboPopup"));
+        popup->setWindowFlag(Qt::FramelessWindowHint, true);
+        popup->setWindowFlag(Qt::NoDropShadowWindowHint, true);
+        popup->setAttribute(Qt::WA_TranslucentBackground, true);
+        popup->setStyleSheet(QStringLiteral("QWidget#comboPopup { background: transparent; }"));
+    }
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -85,8 +124,24 @@ void MainWindow::buildUi()
     mainLayout->setContentsMargins(28, 24, 28, 20);
     mainLayout->setSpacing(16);
 
+    mainLayout->addLayout(buildHeaderLayout());
+    mainLayout->addWidget(buildFileSection());
+    mainLayout->addWidget(buildInputSection());
+    mainLayout->addLayout(buildActionLayout());
+    mainLayout->addWidget(buildResultSection());
+    mainLayout->addWidget(buildComputedSection());
+    mainLayout->addWidget(buildFooterWarning());
+    mainLayout->addStretch();
+
+    setCentralWidget(central);
+    refreshStatusBadge();
+}
+
+QLayout* MainWindow::buildHeaderLayout()
+{
     auto* header = new QGridLayout();
     header->setHorizontalSpacing(12);
+
     auto* title = new QLabel(QStringLiteral("ISO Integrity Check"));
     title->setObjectName(QStringLiteral("title"));
     auto* subtitle = new QLabel(QStringLiteral("Verify ISO downloads with SHA512, SHA256, SHA1, or MD5 checksums."));
@@ -94,13 +149,9 @@ void MainWindow::buildUi()
 
     auto* headerButtons = new QHBoxLayout();
     headerButtons->setSpacing(6);
-    themeButton = new QPushButton(themeButtonText(currentTheme));
-    themeButton->setProperty("variant", "text");
-    themeButton->setCursor(Qt::PointingHandCursor);
+    themeButton = styledButton(themeButtonText(currentTheme), "text");
     connect(themeButton, &QPushButton::clicked, this, &MainWindow::toggleTheme);
-    auto* aboutButton = new QPushButton(QStringLiteral("About"));
-    aboutButton->setProperty("variant", "text");
-    aboutButton->setCursor(Qt::PointingHandCursor);
+    auto* aboutButton = styledButton(QStringLiteral("About"), "text");
     connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
     headerButtons->addWidget(themeButton);
     headerButtons->addWidget(aboutButton);
@@ -109,82 +160,64 @@ void MainWindow::buildUi()
     header->addLayout(headerButtons, 0, 1, Qt::AlignRight | Qt::AlignTop);
     header->addWidget(subtitle, 1, 0, 1, 2);
     header->setColumnStretch(0, 1);
-    mainLayout->addLayout(header);
+    return header;
+}
 
+QWidget* MainWindow::buildFileSection()
+{
     auto* fileBox = card(QStringLiteral("ISO file"));
     auto* fileLayout = new QGridLayout(fileBox);
     fileLayout->setSpacing(10);
     fileEdit = new QLineEdit();
     fileEdit->setPlaceholderText(QStringLiteral("Select an .iso file to verify"));
-    auto* browseButton = new QPushButton(QStringLiteral("Browse..."));
-    browseButton->setProperty("variant", "secondary");
-    browseButton->setCursor(Qt::PointingHandCursor);
+    auto* browseButton = styledButton(QStringLiteral("Browse..."), "secondary");
     connect(browseButton, &QPushButton::clicked, this, &MainWindow::browseIsoFile);
     fileLayout->addWidget(fileEdit, 0, 0);
     fileLayout->addWidget(browseButton, 0, 1);
     fileLayout->setColumnStretch(0, 1);
-    mainLayout->addWidget(fileBox);
+    return fileBox;
+}
 
+QWidget* MainWindow::buildInputSection()
+{
     auto* inputBox = card(QStringLiteral("Verification input"));
     auto* inputLayout = new QGridLayout(inputBox);
     inputLayout->setHorizontalSpacing(12);
     inputLayout->setVerticalSpacing(12);
     algorithmCombo = new QComboBox();
-    algorithmCombo->addItems(iso::supportedHashNames());
-    algorithmCombo->setCursor(Qt::PointingHandCursor);
-    auto* algorithmView = new QListView(algorithmCombo);
-    algorithmView->setFrameShape(QFrame::NoFrame);
-    algorithmCombo->setView(algorithmView);
-    // Force a uniform popup row height; the list view ignores the stylesheet's
-    // min-height when laying out rows, so set it explicitly via the size hint.
-    for (int i = 0; i < algorithmCombo->count(); ++i) {
-        algorithmCombo->setItemData(i, QSize(0, 32), Qt::SizeHintRole);
-    }
-    if (QWidget* popup = algorithmView->parentWidget()) {
-        // The popup is a top-level window; make only this container transparent and
-        // shadow-free so the rounded item view has no square corner artifacts behind
-        // it. The rule is scoped by objectName so it does not affect the child view.
-        popup->setObjectName(QStringLiteral("comboPopup"));
-        popup->setWindowFlag(Qt::FramelessWindowHint, true);
-        popup->setWindowFlag(Qt::NoDropShadowWindowHint, true);
-        popup->setAttribute(Qt::WA_TranslucentBackground, true);
-        popup->setStyleSheet(QStringLiteral("QWidget#comboPopup { background: transparent; }"));
-    }
+    setupAlgorithmCombo(algorithmCombo);
     expectedEdit = new QLineEdit();
     expectedEdit->setPlaceholderText(QStringLiteral("Paste the expected checksum here"));
-    auto* importButton = new QPushButton(QStringLiteral("Import checksum file..."));
-    importButton->setProperty("variant", "secondary");
-    importButton->setCursor(Qt::PointingHandCursor);
+    auto* importButton = styledButton(QStringLiteral("Import checksum file..."), "secondary");
     connect(importButton, &QPushButton::clicked, this, &MainWindow::browseChecksumFile);
-
-    auto* hashLabel = new QLabel(QStringLiteral("Hash type"));
-    hashLabel->setObjectName(QStringLiteral("fieldLabel"));
-    auto* expectedLabel = new QLabel(QStringLiteral("Expected checksum"));
-    expectedLabel->setObjectName(QStringLiteral("fieldLabel"));
-    inputLayout->addWidget(hashLabel, 0, 0);
+    inputLayout->addWidget(fieldLabel(QStringLiteral("Hash type")), 0, 0);
     inputLayout->addWidget(algorithmCombo, 0, 1);
     inputLayout->addWidget(importButton, 0, 2, Qt::AlignRight);
-    inputLayout->addWidget(expectedLabel, 1, 0);
+    inputLayout->addWidget(fieldLabel(QStringLiteral("Expected checksum")), 1, 0);
     inputLayout->addWidget(expectedEdit, 1, 1, 1, 2);
     inputLayout->setColumnStretch(1, 1);
-    mainLayout->addWidget(inputBox);
+    return inputBox;
+}
 
+QLayout* MainWindow::buildActionLayout()
+{
     auto* actionLayout = new QGridLayout();
     actionLayout->setHorizontalSpacing(14);
     progressBar = new QProgressBar();
     progressBar->setRange(0, 1);
     progressBar->setValue(0);
     progressBar->setTextVisible(false);
-    verifyButton = new QPushButton(QStringLiteral("Calculate / Verify"));
-    verifyButton->setProperty("variant", "primary");
+    verifyButton = styledButton(QStringLiteral("Calculate / Verify"), "primary");
     verifyButton->setMinimumHeight(40);
-    verifyButton->setCursor(Qt::PointingHandCursor);
     connect(verifyButton, &QPushButton::clicked, this, &MainWindow::startVerification);
     actionLayout->addWidget(progressBar, 0, 0);
     actionLayout->addWidget(verifyButton, 0, 1);
     actionLayout->setColumnStretch(0, 1);
-    mainLayout->addLayout(actionLayout);
+    return actionLayout;
+}
 
+QWidget* MainWindow::buildResultSection()
+{
     auto* resultBox = card(QStringLiteral("Result"));
     auto* resultLayout = new QVBoxLayout(resultBox);
     resultLayout->setSpacing(10);
@@ -196,31 +229,30 @@ void MainWindow::buildUi()
     detailLabel->setWordWrap(true);
     resultLayout->addWidget(statusLabel);
     resultLayout->addWidget(detailLabel);
-    mainLayout->addWidget(resultBox);
+    return resultBox;
+}
 
+QWidget* MainWindow::buildComputedSection()
+{
     auto* computedBox = card(QStringLiteral("Computed checksum"));
     auto* computedLayout = new QVBoxLayout(computedBox);
     computedLayout->setSpacing(10);
     computedEdit = new QLineEdit();
     computedEdit->setReadOnly(true);
     computedEdit->setPlaceholderText(QStringLiteral("The computed checksum will appear here"));
-    auto* copyButton = new QPushButton(QStringLiteral("Copy computed checksum"));
-    copyButton->setProperty("variant", "secondary");
-    copyButton->setCursor(Qt::PointingHandCursor);
+    auto* copyButton = styledButton(QStringLiteral("Copy computed checksum"), "secondary");
     connect(copyButton, &QPushButton::clicked, this, &MainWindow::copyComputedHash);
     computedLayout->addWidget(computedEdit);
     computedLayout->addWidget(copyButton, 0, Qt::AlignRight);
-    mainLayout->addWidget(computedBox);
+    return computedBox;
+}
 
+QWidget* MainWindow::buildFooterWarning()
+{
     auto* warning = new QLabel(QStringLiteral("Only trust checksums from the official operating system or vendor download page. SHA1 and MD5 are legacy options."));
     warning->setObjectName(QStringLiteral("footnote"));
     warning->setWordWrap(true);
-    mainLayout->addWidget(warning);
-    mainLayout->addStretch();
-
-    setCentralWidget(central);
-
-    refreshStatusBadge();
+    return warning;
 }
 
 void MainWindow::browseIsoFile()
