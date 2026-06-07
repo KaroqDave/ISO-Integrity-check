@@ -15,10 +15,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListView>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSize>
 #include <QStyleHints>
 #include <QThread>
 #include <QVBoxLayout>
@@ -130,6 +132,24 @@ void MainWindow::buildUi()
     algorithmCombo = new QComboBox();
     algorithmCombo->addItems(iso::supportedHashNames());
     algorithmCombo->setCursor(Qt::PointingHandCursor);
+    auto* algorithmView = new QListView(algorithmCombo);
+    algorithmView->setFrameShape(QFrame::NoFrame);
+    algorithmCombo->setView(algorithmView);
+    // Force a uniform popup row height; the list view ignores the stylesheet's
+    // min-height when laying out rows, so set it explicitly via the size hint.
+    for (int i = 0; i < algorithmCombo->count(); ++i) {
+        algorithmCombo->setItemData(i, QSize(0, 32), Qt::SizeHintRole);
+    }
+    if (QWidget* popup = algorithmView->parentWidget()) {
+        // The popup is a top-level window; make only this container transparent and
+        // shadow-free so the rounded item view has no square corner artifacts behind
+        // it. The rule is scoped by objectName so it does not affect the child view.
+        popup->setObjectName(QStringLiteral("comboPopup"));
+        popup->setWindowFlag(Qt::FramelessWindowHint, true);
+        popup->setWindowFlag(Qt::NoDropShadowWindowHint, true);
+        popup->setAttribute(Qt::WA_TranslucentBackground, true);
+        popup->setStyleSheet(QStringLiteral("QWidget#comboPopup { background: transparent; }"));
+    }
     expectedEdit = new QLineEdit();
     expectedEdit->setPlaceholderText(QStringLiteral("Paste the expected checksum here"));
     auto* importButton = new QPushButton(QStringLiteral("Import checksum file..."));
