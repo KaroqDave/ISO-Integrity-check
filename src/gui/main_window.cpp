@@ -134,6 +134,17 @@ QString formatProgressDetail(qint64 bytesRead, qint64 totalBytes)
         .arg(percent);
 }
 
+constexpr int ProgressBarScale = 1000;
+
+int progressBarValueForBytes(qint64 bytesRead, qint64 totalBytes)
+{
+    if (totalBytes <= 0) {
+        return 0;
+    }
+    const qint64 scaled = (bytesRead * ProgressBarScale) / totalBytes;
+    return static_cast<int>(qMin(scaled, static_cast<qint64>(ProgressBarScale)));
+}
+
 void addLineEditContextMenu(QLineEdit* edit)
 {
     edit->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -463,7 +474,9 @@ void MainWindow::startVerification()
     clearMismatchHighlight();
 
     if (verificationFileSize > 0) {
-        progressBar->setRange(0, static_cast<int>(qMin(verificationFileSize, static_cast<qint64>(INT_MAX))));
+        // QProgressBar uses int for its range; scale to 0–1000 so files larger
+        // than ~2 GB still show an accurate percentage via %p%.
+        progressBar->setRange(0, ProgressBarScale);
         progressBar->setValue(0);
         progressBar->setFormat(QStringLiteral("%p%"));
     } else {
@@ -590,9 +603,7 @@ void MainWindow::updateProgress(qint64 bytesRead)
     }
 
     if (verificationFileSize > 0) {
-        const int maxValue = progressBar->maximum();
-        const qint64 clamped = qMin(bytesRead, static_cast<qint64>(maxValue));
-        progressBar->setValue(static_cast<int>(clamped));
+        progressBar->setValue(progressBarValueForBytes(bytesRead, verificationFileSize));
         progressBar->setAccessibleDescription(formatProgressDetail(bytesRead, verificationFileSize));
     }
 
