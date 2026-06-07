@@ -1,11 +1,12 @@
-name: Build
+name: Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -27,22 +28,20 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
 
-      - name: Build
-        run: cmake --build build --config Release --target iso-integrity-check iso-integrity-check-cli iso-core-tests
-
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Build and test
+        run: |
+          cmake --build build --config Release --target iso-integrity-check iso-integrity-check-cli iso-core-tests
+          ctest --test-dir build -C Release --output-on-failure
 
       - name: Build standalone bundle
         shell: pwsh
         run: ./scripts/build-standalone.ps1 -BuildDir build
 
-      - name: Upload Windows bundle
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iso-integrity-check-windows
+          name: windows-release
           path: standalone/*.zip
-          if-no-files-found: error
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -70,19 +69,6 @@ jobs:
           arch: linux_gcc_64
           cache: true
 
-      - name: Configure
-        env:
-          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
-        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        env:
-          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
-        run: cmake --build build-linux --target iso-integrity-check iso-integrity-check-cli iso-core-tests
-
-      - name: Test
-        run: ctest --test-dir build-linux --output-on-failure
-
       - name: Build AppImage
         env:
           CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
@@ -90,9 +76,26 @@ jobs:
           chmod +x ./scripts/build-appimage.sh
           ./scripts/build-appimage.sh
 
-      - name: Upload AppImage
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iso-integrity-check-appimage
+          name: linux-release
           path: standalone/*.AppImage
-          if-no-files-found: error
+
+  publish:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows-release/**
+            artifacts/linux-release/**
+          generate_release_notes: true

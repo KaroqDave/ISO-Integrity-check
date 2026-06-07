@@ -6,8 +6,8 @@
 #include <QFile>
 #include <QFileInfo>
 
-#include <future>
 #include <stdexcept>
+#include <thread>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -23,8 +23,6 @@
 namespace iso {
 namespace {
 
-// Larger buffer than the parser's ChunkSize: hashing throughput benefits from
-// fewer, bigger reads, and the read-ahead below overlaps I/O with compute.
 constexpr qint64 HashBufferSize = 8 * 1024 * 1024;
 
 struct HashCancelledException : std::runtime_error {
@@ -36,6 +34,46 @@ void throwIfCancelled(const CancelToken& cancelToken)
     if (cancelToken && cancelToken->load()) {
         throw HashCancelledException("Verification was cancelled.");
     }
+}
+
+void throwOnReadError(const QFile& file)
+{
+    if (file.error() != QFileDevice::NoError) {
+        throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
+    }
+}
+
+template<typename HashChunkFn>
+void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
+{
+    QByteArray buffer = file.read(HashBufferSize);
+    if (buffer.isEmpty()) {
+        throwOnReadError(file);
+        return;
+    }
+
+    QByteArray nextBuffer;
+    std::thread reader;
+
+    while (!buffer.isEmpty()) {
+        throwIfCancelled(cancelToken);
+
+        reader = std::thread([&file, &nextBuffer]() {
+            nextBuffer = file.read(HashBufferSize);
+        });
+
+        hashChunk(buffer);
+        reader.join();
+
+        if (nextBuffer.isEmpty()) {
+            throwOnReadError(file);
+            break;
+        }
+
+        buffer = std::move(nextBuffer);
+    }
+
+    throwIfCancelled(cancelToken);
 }
 
 #ifdef _WIN32
@@ -61,8 +99,6 @@ LPCWSTR cngAlgorithmId(const QString& algorithm)
     return nullptr;
 }
 
-// Minimal RAII wrapper around the Windows CNG (BCrypt) hashing API, which uses
-// hardware acceleration (SHA-NI) when available.
 class CngHasher {
 public:
     explicit CngHasher(LPCWSTR algorithmId)
@@ -125,32 +161,18 @@ QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& pr
     CngHasher hasher(algorithmId);
     qint64 bytesRead = 0;
 
-    QByteArray buffer = file.read(HashBufferSize);
-    if (buffer.isEmpty() && file.error() != QFileDevice::NoError) {
-        throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
-    }
+    hashFileWithReadAhead(
+        file,
+        [&](const QByteArray& chunk) {
+            hasher.update(chunk.constData(), chunk.size());
+            bytesRead += chunk.size();
+            if (progressCallback) {
+                progressCallback(bytesRead);
+            }
+        },
+        progressCallback,
+        cancelToken);
 
-    while (!buffer.isEmpty()) {
-        throwIfCancelled(cancelToken);
-
-        // Read the next block on another thread while the current block hashes.
-        std::future<QByteArray> nextBlock = std::async(std::launch::async, [&file]() {
-            return file.read(HashBufferSize);
-        });
-
-        hasher.update(buffer.constData(), buffer.size());
-        bytesRead += buffer.size();
-        if (progressCallback) {
-            progressCallback(bytesRead);
-        }
-
-        buffer = nextBlock.get();
-        if (buffer.isEmpty() && file.error() != QFileDevice::NoError) {
-            throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
-        }
-    }
-
-    throwIfCancelled(cancelToken);
     return QString::fromLatin1(hasher.finish().toHex());
 }
 
@@ -161,22 +183,18 @@ QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const P
     QCryptographicHash digest(algorithm);
     qint64 bytesRead = 0;
 
-    while (!file.atEnd()) {
-        throwIfCancelled(cancelToken);
+    hashFileWithReadAhead(
+        file,
+        [&](const QByteArray& chunk) {
+            digest.addData(chunk);
+            bytesRead += chunk.size();
+            if (progressCallback) {
+                progressCallback(bytesRead);
+            }
+        },
+        progressCallback,
+        cancelToken);
 
-        const QByteArray chunk = file.read(HashBufferSize);
-        if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
-            throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
-        }
-
-        digest.addData(chunk);
-        bytesRead += chunk.size();
-        if (progressCallback) {
-            progressCallback(bytesRead);
-        }
-    }
-
-    throwIfCancelled(cancelToken);
     return QString::fromLatin1(digest.result().toHex());
 }
 
@@ -199,7 +217,6 @@ QString calculateFileHash(const QString& filePath, const QString& algorithm, Pro
         try {
             return hashWithCng(file, algorithmId, progressCallback, cancelToken);
         } catch (const CngError&) {
-            // Fall back to the Qt implementation if the CNG provider is unavailable.
             file.seek(0);
         }
     }

@@ -1,22 +1,28 @@
+#include "gui/app_settings.h"
 #include "gui/main_window.h"
 #include "gui/theme.h"
 
 #include <QApplication>
 #include <QIcon>
-#include <QSettings>
 
 namespace {
 
-constexpr auto SettingsOrganization = "KaroqDave";
-constexpr auto SettingsApplication = "ISO Integrity Check";
+struct LaunchOptions {
+    QStringList paths;
+    bool autoVerify = false;
+};
 
-iso::Theme loadInitialTheme()
+LaunchOptions parseLaunchOptions(const QStringList& arguments)
 {
-    QSettings settings(QString::fromLatin1(SettingsOrganization), QString::fromLatin1(SettingsApplication));
-    if (settings.contains(QStringLiteral("theme"))) {
-        return iso::themeFromSettings(settings.value(QStringLiteral("theme")).toInt());
+    LaunchOptions options;
+    for (const QString& arg : arguments) {
+        if (arg == QStringLiteral("--verify")) {
+            options.autoVerify = true;
+        } else if (!arg.startsWith(QLatin1Char('-'))) {
+            options.paths.append(arg);
+        }
     }
-    return iso::Theme::System;
+    return options;
 }
 
 } // namespace
@@ -24,15 +30,19 @@ iso::Theme loadInitialTheme()
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
-    QApplication::setOrganizationName(QString::fromLatin1(SettingsOrganization));
-    QApplication::setApplicationName(QString::fromLatin1(SettingsApplication));
+    QApplication::setOrganizationName(QStringLiteral("KaroqDave"));
+    QApplication::setApplicationName(QStringLiteral("ISO Integrity Check"));
 
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));
 
-    const iso::Theme initialTheme = loadInitialTheme();
-    iso::applyTheme(app, initialTheme);
+    const iso::AppSettings settings = iso::loadAppSettings();
+    iso::applyTheme(app, settings.theme);
 
-    MainWindow window(initialTheme);
+    MainWindow window(settings.theme);
+    const LaunchOptions launchOptions = parseLaunchOptions(app.arguments());
+    if (!launchOptions.paths.isEmpty()) {
+        window.handleLaunchArgs(launchOptions.paths, launchOptions.autoVerify);
+    }
     window.show();
 
     return app.exec();

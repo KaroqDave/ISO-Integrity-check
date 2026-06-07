@@ -42,7 +42,7 @@ The AppImage works on Ubuntu 22.04+, Fedora, Arch, and other recent x86_64 distr
 Prerequisites:
 
 - CMake 3.21 or newer.
-- Qt 6 with the `Core` and `Widgets` components.
+- Qt 6.8 or newer with the `Core` and `Widgets` components.
 
 ### Windows
 
@@ -53,6 +53,7 @@ Configure and build:
 ```powershell
 cmake -S . -B build -DCMAKE_PREFIX_PATH="C:\Qt\6.10.3\msvc2022_64"
 cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
 The executable is produced at:
@@ -81,6 +82,30 @@ cmake --build build-linux --config Release --target iso-integrity-check
 ```
 
 The executable is produced at `build-linux/iso-integrity-check`.
+
+### Headless CLI
+
+The C++ CLI reuses the same core hashing and parsing logic:
+
+```powershell
+build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --expected <sha256>
+build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --checksum-file SHA256SUMS
+```
+
+On Linux:
+
+```bash
+./build-linux/iso-integrity-check-cli --file ./example.iso --algorithm SHA256
+```
+
+Exit codes: `0` = match or hash-only success, `1` = mismatch, `2` = error.
+
+### C++ Tests
+
+```powershell
+cmake --build build --config Release --target iso-core-tests
+ctest --test-dir build -C Release --output-on-failure
+```
 
 ## Standalone Build (Export For Distribution)
 

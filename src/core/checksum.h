@@ -9,7 +9,6 @@
 
 namespace iso {
 
-constexpr qsizetype ChunkSize = 4 * 1024 * 1024;
 constexpr qint64 MaxChecksumFileSize = 1024 * 1024;
 
 struct HashDetails {

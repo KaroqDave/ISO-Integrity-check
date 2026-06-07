@@ -1,21 +1,25 @@
 #pragma once
 
 #include "core/verifier.h"
+#include "gui/app_settings.h"
 #include "gui/theme.h"
+#include "gui/verification_controller.h"
 
+#include <QElapsedTimer>
 #include <QMainWindow>
 
 class QCloseEvent;
 class QComboBox;
 class QDragEnterEvent;
+class QDragMoveEvent;
 class QDropEvent;
+class QMimeData;
 class QGroupBox;
 class QLayout;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QLabel;
-class QThread;
 class QWidget;
 
 class MainWindow : public QMainWindow {
@@ -24,9 +28,16 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(iso::Theme initialTheme = iso::Theme::System, QWidget* parent = nullptr);
 
+    void handleLaunchArgs(const QStringList& paths, bool autoVerify = false);
+
+    void handleSectionDragEnter(QDragEnterEvent* event, QWidget* targetSection);
+    void handleSectionDragMove(QDragMoveEvent* event, QWidget* targetSection);
+    void handleSectionDrop(QDropEvent* event, QWidget* targetSection);
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
 private:
@@ -59,6 +70,7 @@ private:
     void setStatus(iso::VerificationStatus status, const QString& message, const QString& detail = {});
     void setComputedHash(const QString& value);
     void copyComputedHash();
+    void copyExpectedChecksum();
     void clearAll();
     void showAbout();
     void toggleTheme();
@@ -68,10 +80,14 @@ private:
     void applyMismatchHighlight(const QString& expected, const QString& computed);
     void clearMismatchHighlight();
     QString resultDetail(const iso::VerificationResult& result) const;
+    QString currentAlgorithm() const;
+    void setAlgorithm(const QString& algorithm);
     quint64 nextJobToken();
     bool isIsoPath(const QString& path) const;
     bool isChecksumPath(const QString& path) const;
-    void handleDroppedPath(const QString& path, QWidget* targetWidget);
+    bool acceptDragUrls(const QMimeData* mimeData, QWidget* targetWidget) const;
+    void processDroppedUrls(const QList<QUrl>& urls, QWidget* targetWidget);
+    void awaitActiveWorker(int timeoutMs = 30000);
 
     QLineEdit* fileEdit = nullptr;
     QLineEdit* expectedEdit = nullptr;
@@ -81,14 +97,18 @@ private:
     QPushButton* verifyButton = nullptr;
     QPushButton* browseIsoButton = nullptr;
     QPushButton* importButton = nullptr;
+    QPushButton* copyExpectedButton = nullptr;
     QPushButton* clearButton = nullptr;
     QPushButton* themeButton = nullptr;
     QLabel* statusLabel = nullptr;
     QLabel* detailLabel = nullptr;
     QLabel* expectedHintLabel = nullptr;
+    QLabel* mismatchDiffLabel = nullptr;
     QGroupBox* fileSection = nullptr;
     QGroupBox* inputSection = nullptr;
 
+    VerificationController verificationController;
+    iso::AppSettings appSettings;
     iso::Theme currentTheme = iso::Theme::System;
     iso::VerificationStatus currentStatus = iso::VerificationStatus::Generated;
 
@@ -98,6 +118,6 @@ private:
     qint64 verificationFileSize = 0;
     QString activeVerificationSummary;
 
-    QThread* activeWorker = nullptr;
-    iso::CancelToken activeCancelToken;
+    QElapsedTimer progressElapsedTimer;
+    qint64 lastProgressBytes = 0;
 };
