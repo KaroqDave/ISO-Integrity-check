@@ -61,7 +61,7 @@ private:
     void toggleTheme();
     void applyCurrentTheme();
     void refreshStatusBadge();
-    void updateExpectedValidation();
+    void updateExpectedValidation(bool autoDetectAlgorithm = true);
     void applyMismatchHighlight(const QString& expected, const QString& computed);
     void clearMismatchHighlight();
     QString resultDetail(const iso::VerificationResult& result) const;

@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
+#include <QSignalBlocker>
 #include <QSize>
 #include <QStyle>
 #include <QStyleHints>
@@ -316,7 +317,8 @@ QWidget* MainWindow::buildInputSection()
     expectedEdit->setPlaceholderText(QStringLiteral("Paste the expected checksum here"));
     expectedEdit->setAccessibleName(QStringLiteral("Expected checksum"));
     expectedEdit->setAccessibleDescription(QStringLiteral("Official checksum to compare against the computed hash"));
-    connect(expectedEdit, &QLineEdit::textChanged, this, &MainWindow::updateExpectedValidation);
+    connect(expectedEdit, &QLineEdit::textChanged, this, [this]() { updateExpectedValidation(true); });
+    connect(algorithmCombo, &QComboBox::currentTextChanged, this, [this]() { updateExpectedValidation(false); });
     expectedHintLabel = new QLabel;
     expectedHintLabel->setObjectName(QStringLiteral("footnote"));
     expectedHintLabel->setWordWrap(true);
@@ -340,6 +342,7 @@ QLayout* MainWindow::buildActionLayout()
     progressBar->setRange(0, 1);
     progressBar->setValue(0);
     progressBar->setTextVisible(true);
+    progressBar->setMinimumHeight(28);
     progressBar->setAccessibleName(QStringLiteral("Verification progress"));
     verifyButton = styledButton(QStringLiteral("Calculate / Verify"), "primary");
     verifyButton->setMinimumHeight(40);
@@ -466,21 +469,19 @@ void MainWindow::startVerification()
     activeCancelToken = iso::makeCancelToken();
 
     setRunning(true);
-    setStatus(
-        iso::VerificationStatus::Generated,
-        activeVerificationSummary,
-        verificationFileSize > 0 ? formatProgressDetail(0, verificationFileSize) : QStringLiteral("Large ISO files can take a little while."));
+    setStatus(iso::VerificationStatus::Generated, activeVerificationSummary, QString());
     setComputedHash({});
     clearMismatchHighlight();
 
     if (verificationFileSize > 0) {
         // QProgressBar uses int for its range; scale to 0–1000 so files larger
-        // than ~2 GB still show an accurate percentage via %p%.
+        // than ~2 GB still show an accurate percentage via the custom format text.
         progressBar->setRange(0, ProgressBarScale);
         progressBar->setValue(0);
-        progressBar->setFormat(QStringLiteral("%p%"));
+        progressBar->setFormat(formatProgressDetail(0, verificationFileSize));
     } else {
         progressBar->setRange(0, 0);
+        progressBar->setFormat(QStringLiteral("Calculating..."));
     }
 
     auto* worker = QThread::create([this, filePath, expectedChecksum, algorithm, jobToken, cancelToken = activeCancelToken]() {
@@ -604,10 +605,9 @@ void MainWindow::updateProgress(qint64 bytesRead)
 
     if (verificationFileSize > 0) {
         progressBar->setValue(progressBarValueForBytes(bytesRead, verificationFileSize));
+        progressBar->setFormat(formatProgressDetail(bytesRead, verificationFileSize));
         progressBar->setAccessibleDescription(formatProgressDetail(bytesRead, verificationFileSize));
     }
-
-    detailLabel->setText(formatProgressDetail(bytesRead, verificationFileSize));
 }
 
 void MainWindow::setStatus(iso::VerificationStatus status, const QString& message, const QString& detail)
@@ -712,7 +712,7 @@ void MainWindow::refreshStatusBadge()
         .arg(fg.name(QColor::HexRgb)));
 }
 
-void MainWindow::updateExpectedValidation()
+void MainWindow::updateExpectedValidation(bool autoDetectAlgorithm)
 {
     if (!expectedHintLabel) {
         return;
@@ -721,12 +721,16 @@ void MainWindow::updateExpectedValidation()
     const QString value = expectedEdit ? expectedEdit->text().trimmed() : QString{};
     if (value.isEmpty()) {
         expectedHintLabel->clear();
+        expectedHintLabel->setStyleSheet({});
         return;
     }
 
-    if (const auto detected = iso::algorithmFromChecksumLength(value.size())) {
-        if (algorithmCombo && algorithmCombo->currentText() != *detected) {
-            algorithmCombo->setCurrentText(*detected);
+    if (autoDetectAlgorithm) {
+        if (const auto detected = iso::algorithmFromChecksumLength(value.size())) {
+            if (algorithmCombo && algorithmCombo->currentText() != *detected) {
+                QSignalBlocker blocker(algorithmCombo);
+                algorithmCombo->setCurrentText(*detected);
+            }
         }
     }
 

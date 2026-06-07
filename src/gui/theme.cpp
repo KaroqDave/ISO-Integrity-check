@@ -240,8 +240,9 @@ QProgressBar {
     background: @surfaceAlt;
     border: 1px solid @border;
     border-radius: 7px;
-    height: 10px;
+    min-height: 28px;
     text-align: center;
+    color: @text;
 }
 QProgressBar::chunk {
     background: @accent;
