@@ -44,8 +44,10 @@ Palette lightPalette()
     p.accentPressed = QColor("#1e40af");
     p.accentText = QColor("#ffffff");
     p.statusMatch = QColor("#15803d");
+    p.statusMismatch = QColor("#c2410c");
     p.statusError = QColor("#b91c1c");
     p.statusInfo = QColor("#2563eb");
+    p.statusCancelled = QColor("#64748b");
     p.isDark = false;
     return p;
 }
@@ -64,8 +66,10 @@ Palette darkPalette()
     p.accentPressed = QColor("#2563eb");
     p.accentText = QColor("#ffffff");
     p.statusMatch = QColor("#4ade80");
+    p.statusMismatch = QColor("#fb923c");
     p.statusError = QColor("#f87171");
     p.statusInfo = QColor("#60a5fa");
+    p.statusCancelled = QColor("#94a3b8");
     p.isDark = true;
     return p;
 }
@@ -285,6 +289,48 @@ void applyTheme(QApplication& app, Theme theme)
     app.setStyleSheet(buildStyleSheet(p));
 }
 
+Theme themeFromSettings(int value)
+{
+    switch (value) {
+    case 1:
+        return Theme::Light;
+    case 2:
+        return Theme::Dark;
+    default:
+        return Theme::System;
+    }
+}
+
+int themeToSettings(Theme theme)
+{
+    switch (theme) {
+    case Theme::Light:
+        return 1;
+    case Theme::Dark:
+        return 2;
+    case Theme::System:
+        return 0;
+    }
+    return 0;
+}
+
+QString statusBadgePrefix(VerificationStatus status)
+{
+    switch (status) {
+    case VerificationStatus::Match:
+        return QStringLiteral("\u2713 ");
+    case VerificationStatus::Mismatch:
+        return QStringLiteral("\u2717 ");
+    case VerificationStatus::Error:
+        return QStringLiteral("\u26A0 ");
+    case VerificationStatus::Cancelled:
+        return QStringLiteral("\u2014 ");
+    case VerificationStatus::Generated:
+        return {};
+    }
+    return {};
+}
+
 QColor statusBadgeBackground(VerificationStatus status, const Palette& palette)
 {
     QColor base;
@@ -293,8 +339,13 @@ QColor statusBadgeBackground(VerificationStatus status, const Palette& palette)
         base = palette.statusMatch;
         break;
     case VerificationStatus::Mismatch:
+        base = palette.statusMismatch;
+        break;
     case VerificationStatus::Error:
         base = palette.statusError;
+        break;
+    case VerificationStatus::Cancelled:
+        base = palette.statusCancelled;
         break;
     case VerificationStatus::Generated:
         base = palette.statusInfo;
@@ -317,8 +368,11 @@ QColor statusBadgeText(VerificationStatus status, const Palette& palette)
     case VerificationStatus::Match:
         return palette.statusMatch;
     case VerificationStatus::Mismatch:
+        return palette.statusMismatch;
     case VerificationStatus::Error:
         return palette.statusError;
+    case VerificationStatus::Cancelled:
+        return palette.statusCancelled;
     case VerificationStatus::Generated:
         return palette.statusInfo;
     }

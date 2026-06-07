@@ -27,6 +27,17 @@ namespace {
 // fewer, bigger reads, and the read-ahead below overlaps I/O with compute.
 constexpr qint64 HashBufferSize = 8 * 1024 * 1024;
 
+struct HashCancelledException : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+void throwIfCancelled(const CancelToken& cancelToken)
+{
+    if (cancelToken && cancelToken->load()) {
+        throw HashCancelledException("Verification was cancelled.");
+    }
+}
+
 #ifdef _WIN32
 
 struct CngError : std::runtime_error {
@@ -109,7 +120,7 @@ private:
     BCRYPT_HASH_HANDLE hash_ = nullptr;
 };
 
-QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCallback)
+QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
 {
     CngHasher hasher(algorithmId);
     qint64 bytesRead = 0;
@@ -120,6 +131,8 @@ QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& pr
     }
 
     while (!buffer.isEmpty()) {
+        throwIfCancelled(cancelToken);
+
         // Read the next block on another thread while the current block hashes.
         std::future<QByteArray> nextBlock = std::async(std::launch::async, [&file]() {
             return file.read(HashBufferSize);
@@ -137,17 +150,20 @@ QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& pr
         }
     }
 
+    throwIfCancelled(cancelToken);
     return QString::fromLatin1(hasher.finish().toHex());
 }
 
 #endif // _WIN32
 
-QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const ProgressCallback& progressCallback)
+QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
 {
     QCryptographicHash digest(algorithm);
     qint64 bytesRead = 0;
 
     while (!file.atEnd()) {
+        throwIfCancelled(cancelToken);
+
         const QByteArray chunk = file.read(HashBufferSize);
         if (chunk.isEmpty() && file.error() != QFileDevice::NoError) {
             throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
@@ -160,12 +176,13 @@ QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const P
         }
     }
 
+    throwIfCancelled(cancelToken);
     return QString::fromLatin1(digest.result().toHex());
 }
 
 } // namespace
 
-QString calculateFileHash(const QString& filePath, const QString& algorithm, ProgressCallback progressCallback)
+QString calculateFileHash(const QString& filePath, const QString& algorithm, ProgressCallback progressCallback, CancelToken cancelToken)
 {
     const auto hashes = supportedHashes();
     if (!hashes.contains(algorithm)) {
@@ -180,7 +197,7 @@ QString calculateFileHash(const QString& filePath, const QString& algorithm, Pro
 #ifdef _WIN32
     if (LPCWSTR algorithmId = cngAlgorithmId(algorithm)) {
         try {
-            return hashWithCng(file, algorithmId, progressCallback);
+            return hashWithCng(file, algorithmId, progressCallback, cancelToken);
         } catch (const CngError&) {
             // Fall back to the Qt implementation if the CNG provider is unavailable.
             file.seek(0);
@@ -188,10 +205,15 @@ QString calculateFileHash(const QString& filePath, const QString& algorithm, Pro
     }
 #endif
 
-    return hashWithQt(file, hashes.value(algorithm).qtAlgorithm, progressCallback);
+    return hashWithQt(file, hashes.value(algorithm).qtAlgorithm, progressCallback, cancelToken);
 }
 
-VerificationResult verifyChecksum(const QString& filePath, const QString& expectedChecksum, const QString& algorithm)
+VerificationResult verifyChecksum(
+    const QString& filePath,
+    const QString& expectedChecksum,
+    const QString& algorithm,
+    ProgressCallback progressCallback,
+    CancelToken cancelToken)
 {
     const QFileInfo info(filePath);
     if (filePath.isEmpty()) {
@@ -216,7 +238,18 @@ VerificationResult verifyChecksum(const QString& filePath, const QString& expect
     }
 
     const QString normalizedExpected = normalizeChecksum(expectedChecksum);
-    const QString computedHash = calculateFileHash(filePath, algorithm);
+
+    QString computedHash;
+    try {
+        computedHash = calculateFileHash(filePath, algorithm, std::move(progressCallback), cancelToken);
+    } catch (const HashCancelledException&) {
+        return {
+            VerificationStatus::Cancelled,
+            QStringLiteral("Verification cancelled."),
+            {},
+            std::nullopt,
+        };
+    }
 
     if (normalizedExpected.isEmpty()) {
         return {
@@ -230,7 +263,7 @@ VerificationResult verifyChecksum(const QString& filePath, const QString& expect
     if (computedHash == normalizedExpected) {
         return {
             VerificationStatus::Match,
-            QStringLiteral("Match. The ISO checksum matches the expected value."),
+            QStringLiteral("The ISO checksum matches the expected value."),
             computedHash,
             true,
         };
@@ -238,10 +271,27 @@ VerificationResult verifyChecksum(const QString& filePath, const QString& expect
 
     return {
         VerificationStatus::Mismatch,
-        QStringLiteral("Mismatch. The ISO checksum does not match the expected value."),
+        QStringLiteral("The ISO checksum does not match the expected value."),
         computedHash,
         false,
     };
+}
+
+QString formatStatusMessage(VerificationStatus status, const QString& message)
+{
+    switch (status) {
+    case VerificationStatus::Match:
+        return QStringLiteral("Match: %1").arg(message);
+    case VerificationStatus::Mismatch:
+        return QStringLiteral("Mismatch: %1").arg(message);
+    case VerificationStatus::Error:
+        return QStringLiteral("Error: %1").arg(message);
+    case VerificationStatus::Generated:
+        return message;
+    case VerificationStatus::Cancelled:
+        return QStringLiteral("Cancelled: %1").arg(message);
+    }
+    return message;
 }
 
 } // namespace iso

@@ -32,8 +32,10 @@ struct Palette {
     QColor accentPressed;
     QColor accentText;
     QColor statusMatch;
+    QColor statusMismatch;
     QColor statusError;
     QColor statusInfo;
+    QColor statusCancelled;
     bool isDark = false;
 };
 
@@ -45,6 +47,9 @@ const Palette& paletteFor(ColorScheme scheme);
 
 QString buildStyleSheet(const Palette& palette);
 
+Theme themeFromSettings(int value);
+int themeToSettings(Theme theme);
+
 // Applies the Fusion base style, a matching QPalette, and the generated
 // stylesheet for the resolved color scheme.
 void applyTheme(QApplication& app, Theme theme);
@@ -53,5 +58,7 @@ void applyTheme(QApplication& app, Theme theme);
 // the supplied palette.
 QColor statusBadgeBackground(VerificationStatus status, const Palette& palette);
 QColor statusBadgeText(VerificationStatus status, const Palette& palette);
+
+QString statusBadgePrefix(VerificationStatus status);
 
 } // namespace iso

@@ -3,7 +3,9 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 
 namespace iso {
@@ -13,6 +15,7 @@ enum class VerificationStatus {
     Mismatch,
     Error,
     Generated,
+    Cancelled,
 };
 
 struct VerificationResult {
@@ -23,8 +26,26 @@ struct VerificationResult {
 };
 
 using ProgressCallback = std::function<void(qint64 bytesRead)>;
+using CancelToken = std::shared_ptr<std::atomic<bool>>;
 
-QString calculateFileHash(const QString& filePath, const QString& algorithm, ProgressCallback progressCallback = {});
-VerificationResult verifyChecksum(const QString& filePath, const QString& expectedChecksum, const QString& algorithm);
+inline CancelToken makeCancelToken()
+{
+    return std::make_shared<std::atomic<bool>>(false);
+}
+
+QString calculateFileHash(
+    const QString& filePath,
+    const QString& algorithm,
+    ProgressCallback progressCallback = {},
+    CancelToken cancelToken = {});
+
+VerificationResult verifyChecksum(
+    const QString& filePath,
+    const QString& expectedChecksum,
+    const QString& algorithm,
+    ProgressCallback progressCallback = {},
+    CancelToken cancelToken = {});
+
+QString formatStatusMessage(VerificationStatus status, const QString& message);
 
 } // namespace iso
