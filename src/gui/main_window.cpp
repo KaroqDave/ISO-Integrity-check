@@ -146,14 +146,18 @@ int progressBarValueForBytes(qint64 bytesRead, qint64 totalBytes)
     return static_cast<int>(qMin(scaled, static_cast<qint64>(ProgressBarScale)));
 }
 
-void addLineEditContextMenu(QLineEdit* edit)
+void addLineEditContextMenu(QLineEdit* edit, bool readOnlyMenu = false)
 {
     edit->setContextMenuPolicy(Qt::CustomContextMenu);
-    QObject::connect(edit, &QLineEdit::customContextMenuRequested, edit, [edit](const QPoint& position) {
+    QObject::connect(edit, &QLineEdit::customContextMenuRequested, edit, [edit, readOnlyMenu](const QPoint& position) {
         QMenu menu(edit);
-        menu.addAction(QStringLiteral("Cut"), edit, &QLineEdit::cut);
+        if (!readOnlyMenu) {
+            menu.addAction(QStringLiteral("Cut"), edit, &QLineEdit::cut);
+        }
         menu.addAction(QStringLiteral("Copy"), edit, &QLineEdit::copy);
-        menu.addAction(QStringLiteral("Paste"), edit, &QLineEdit::paste);
+        if (!readOnlyMenu) {
+            menu.addAction(QStringLiteral("Paste"), edit, &QLineEdit::paste);
+        }
         menu.addSeparator();
         menu.addAction(QStringLiteral("Select All"), edit, &QLineEdit::selectAll);
         menu.exec(edit->mapToGlobal(position));
@@ -228,7 +232,7 @@ void MainWindow::setupShortcuts()
 
 void MainWindow::setupContextMenus()
 {
-    addLineEditContextMenu(fileEdit);
+    addLineEditContextMenu(fileEdit, true);
     addLineEditContextMenu(expectedEdit);
     addLineEditContextMenu(computedEdit);
 }
@@ -293,6 +297,7 @@ QWidget* MainWindow::buildFileSection()
     auto* fileLayout = new QGridLayout(fileSection);
     fileLayout->setSpacing(10);
     fileEdit = new QLineEdit();
+    fileEdit->setReadOnly(true);
     fileEdit->setPlaceholderText(QStringLiteral("Select an .iso file to verify, or drag and drop one here"));
     fileEdit->setAccessibleName(QStringLiteral("ISO file path"));
     fileEdit->setAccessibleDescription(QStringLiteral("Path to the ISO file to verify"));
@@ -398,10 +403,43 @@ QWidget* MainWindow::buildFooterWarning()
 
 void MainWindow::browseIsoFile()
 {
-    const QString selected = QFileDialog::getOpenFileName(this, QStringLiteral("Choose ISO file"), {}, QStringLiteral("ISO files (*.iso);;All files (*.*)"));
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("Choose ISO file"),
+        {},
+        QStringLiteral("ISO files (*.iso)"));
     if (!selected.isEmpty()) {
-        setIsoFile(selected);
+        trySetIsoFile(selected);
     }
+}
+
+void MainWindow::rejectWrongFileType(const QString& path, const QString& expectedDescription)
+{
+    QMessageBox::warning(
+        this,
+        QStringLiteral("Unsupported file type"),
+        QStringLiteral("\"%1\" is not accepted for this field.\n\nExpected: %2.")
+            .arg(QFileInfo(path).fileName(), expectedDescription));
+}
+
+bool MainWindow::trySetIsoFile(const QString& path)
+{
+    if (!isIsoPath(path)) {
+        rejectWrongFileType(path, QStringLiteral("an ISO file with the .iso extension"));
+        return false;
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("ISO file"),
+            QStringLiteral("The selected path is not an existing file."));
+        return false;
+    }
+
+    setIsoFile(path);
+    return true;
 }
 
 void MainWindow::setIsoFile(const QString& path)
@@ -418,10 +456,32 @@ void MainWindow::browseChecksumFile()
         this,
         QStringLiteral("Choose checksum file"),
         {},
-        QStringLiteral("Checksum files (*.sha256 *.sha512 *.sha1 *.md5 *.txt *SUMS);;All files (*.*)"));
+        QStringLiteral("Checksum files (*.sha256 *.sha512 *.sha1 *.md5 *.txt *SUMS)"));
     if (!selected.isEmpty()) {
-        importChecksumFile(selected);
+        tryImportChecksumFile(selected);
     }
+}
+
+bool MainWindow::tryImportChecksumFile(const QString& path)
+{
+    if (!isChecksumPath(path)) {
+        rejectWrongFileType(
+            path,
+            QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
+        return false;
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("Checksum file"),
+            QStringLiteral("The selected path is not an existing file."));
+        return false;
+    }
+
+    importChecksumFile(path);
+    return true;
 }
 
 void MainWindow::importChecksumFile(const QString& path)
@@ -457,7 +517,25 @@ void MainWindow::startVerification()
     const QString filePath = fileEdit->text();
     const QString expectedChecksum = expectedEdit->text();
     const QString algorithm = algorithmCombo->currentText();
+
+    if (filePath.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("ISO file"), QStringLiteral("Choose an ISO file first."));
+        return;
+    }
+
+    if (!isIsoPath(filePath)) {
+        rejectWrongFileType(filePath, QStringLiteral("an ISO file with the .iso extension"));
+        return;
+    }
+
     const QFileInfo fileInfo(filePath);
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("ISO file"),
+            QStringLiteral("The selected path is not an existing ISO file."));
+        return;
+    }
 
     verificationFileSize = fileInfo.exists() ? fileInfo.size() : 0;
     activeVerificationSummary = fileInfo.exists()
@@ -807,13 +885,23 @@ bool MainWindow::isChecksumPath(const QString& path) const
 
 void MainWindow::handleDroppedPath(const QString& path, QWidget* targetWidget)
 {
-    if (targetWidget == fileSection || (targetWidget != inputSection && isIsoPath(path))) {
-        setIsoFile(path);
+    if (targetWidget == fileSection) {
+        trySetIsoFile(path);
         return;
     }
 
-    if (targetWidget == inputSection || isChecksumPath(path)) {
-        importChecksumFile(path);
+    if (targetWidget == inputSection) {
+        tryImportChecksumFile(path);
+        return;
+    }
+
+    // Drop landed outside a card: route by file type only.
+    if (isIsoPath(path)) {
+        trySetIsoFile(path);
+    } else if (isChecksumPath(path)) {
+        tryImportChecksumFile(path);
+    } else {
+        rejectWrongFileType(path, QStringLiteral("an ISO file (.iso) or a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
     }
 }
 
@@ -823,11 +911,33 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* event)
         return;
     }
 
+    QWidget* targetWidget = childAt(event->position().toPoint());
+    while (targetWidget && targetWidget != fileSection && targetWidget != inputSection) {
+        targetWidget = targetWidget->parentWidget();
+    }
+
     for (const QUrl& url : event->mimeData()->urls()) {
         if (!url.isLocalFile()) {
             continue;
         }
         const QString path = url.toLocalFile();
+
+        if (targetWidget == fileSection) {
+            if (isIsoPath(path)) {
+                event->acceptProposedAction();
+                return;
+            }
+            continue;
+        }
+
+        if (targetWidget == inputSection) {
+            if (isChecksumPath(path)) {
+                event->acceptProposedAction();
+                return;
+            }
+            continue;
+        }
+
         if (isIsoPath(path) || isChecksumPath(path)) {
             event->acceptProposedAction();
             return;
@@ -851,11 +961,37 @@ void MainWindow::dropEvent(QDropEvent* event)
             continue;
         }
         const QString path = url.toLocalFile();
+
+        if (targetWidget == fileSection) {
+            if (isIsoPath(path)) {
+                trySetIsoFile(path);
+                event->acceptProposedAction();
+                return;
+            }
+            rejectWrongFileType(path, QStringLiteral("an ISO file with the .iso extension"));
+            return;
+        }
+
+        if (targetWidget == inputSection) {
+            if (isChecksumPath(path)) {
+                tryImportChecksumFile(path);
+                event->acceptProposedAction();
+                return;
+            }
+            rejectWrongFileType(
+                path,
+                QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
+            return;
+        }
+
         if (isIsoPath(path) || isChecksumPath(path)) {
             handleDroppedPath(path, targetWidget);
             event->acceptProposedAction();
             return;
         }
+
+        rejectWrongFileType(path, QStringLiteral("an ISO file (.iso) or a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
+        return;
     }
 }
 

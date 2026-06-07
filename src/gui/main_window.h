@@ -47,6 +47,9 @@ private:
     void importChecksumFile(const QString& path);
     void browseChecksumFile();
     void setIsoFile(const QString& path);
+    bool trySetIsoFile(const QString& path);
+    bool tryImportChecksumFile(const QString& path);
+    void rejectWrongFileType(const QString& path, const QString& expectedDescription);
     void onVerifyOrCancelClicked();
     void startVerification();
     void cancelVerification();
