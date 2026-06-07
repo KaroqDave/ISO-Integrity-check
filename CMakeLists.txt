@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ISOIntegrityCheck VERSION 1.0.1 LANGUAGES CXX RC)
+project(ISOIntegrityCheck VERSION 1.0.2 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

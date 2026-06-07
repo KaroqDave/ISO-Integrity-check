@@ -3,8 +3,8 @@
 IDI_ICON1 ICON "icons/app.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,1,0
- PRODUCTVERSION 1,0,1,0
+ FILEVERSION 1,0,2,0
+ PRODUCTVERSION 1,0,2,0
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
  FILEFLAGS 0
  FILEOS VOS__WINDOWS32
@@ -17,12 +17,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "KaroqDave"
             VALUE "FileDescription", "ISO Integrity Check"
-            VALUE "FileVersion", "1.0.1.0"
+            VALUE "FileVersion", "1.0.2.0"
             VALUE "InternalName", "iso-integrity-check"
             VALUE "LegalCopyright", "Copyright (C) 2026 KaroqDave"
             VALUE "OriginalFilename", "iso-integrity-check.exe"
             VALUE "ProductName", "ISO Integrity Check"
-            VALUE "ProductVersion", "1.0.1.0"
+            VALUE "ProductVersion", "1.0.2.0"
         END
     END
     BLOCK "VarFileInfo"
