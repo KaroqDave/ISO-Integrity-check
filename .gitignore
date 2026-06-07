@@ -1,2 +1,36 @@
 __pycache__/
 *.py[cod]
+.vscode/
+
+# Editor / language-server artifacts
+.cache/
+.clangd
+compile_commands.json
+compile_flags.txt
+
+# C++ / CMake build output
+build/
+out/
+standalone/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+
+# Visual Studio / MSVC
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Binaries
+*.exe
+*.dll

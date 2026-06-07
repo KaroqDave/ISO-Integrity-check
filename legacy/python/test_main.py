@@ -13,8 +13,8 @@ from main import (
     verify_checksum,
 )
 
-REPO_ROOT = Path(__file__).resolve().parent
-CLI_SCRIPT = REPO_ROOT / "CLI" / "iso-integrity-check.ps1"
+LEGACY_ROOT = Path(__file__).resolve().parents[1]
+CLI_SCRIPT = LEGACY_ROOT / "cli" / "iso-integrity-check.ps1"
 POWERSHELL = shutil.which("powershell.exe") or shutil.which("powershell")
 
 

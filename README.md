@@ -1,26 +1,55 @@
 # ISO Integrity Check
 
-A simple Windows-friendly tool for checking ISO file integrity with trusted checksums.
+A Windows desktop app for checking ISO file integrity with trusted checksums.
 
-![ISO Integrity Check screenshot](docs/screenshot.png)
+The primary implementation is now a C++/Qt app that builds to a native `.exe`. The older Python GUI and PowerShell CLI remain available under `legacy/`, but they are no longer the main development target.
 
-## Run The GUI
+## Download (Ready To Run)
+
+Grab the latest standalone build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases):
+
+1. Download `ISO-Integrity-Check-<version>.zip`.
+2. Extract it anywhere.
+3. Run `iso-integrity-check.exe`.
+
+Keep the DLLs and plugin folders next to the executable. If Windows reports missing runtime DLLs, install the latest [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe).
+
+## Build The C++ App
+
+Prerequisites:
+
+- Visual Studio 2022 with the MSVC C++ toolchain.
+- CMake 3.21 or newer.
+- Qt 6 with the `Core` and `Widgets` components.
+
+Configure and build:
 
 ```powershell
-python main.py
+cmake -S . -B build -DCMAKE_PREFIX_PATH="C:\Qt\6.10.3\msvc2022_64"
+cmake --build build --config Release
 ```
 
-No external Python packages are required. The app uses Python's built-in Tkinter GUI toolkit and standard hashing library.
+The executable is produced at:
 
-## Run Without Python
+```text
+build\Release\iso-integrity-check.exe
+```
 
-A separate command-line version is available in the `CLI` folder for users who do not have Python installed. It runs through Windows PowerShell and uses the built-in `Get-FileHash` command.
+The build runs `windeployqt` after compiling the GUI, so Qt runtime DLLs and plugins are copied beside the executable. Adjust `CMAKE_PREFIX_PATH` if your Qt version or kit path changes.
+
+## Standalone Build (Export For Distribution)
+
+To produce a clean, self-contained folder (and a zip ready for a release), run:
 
 ```powershell
-.\CLI\iso-integrity-check.cmd -File "C:\Downloads\example.iso" -ChecksumFile "C:\Downloads\SHA256SUMS"
+./scripts/build-standalone.ps1
 ```
 
-See `CLI\README.md` for terminal examples, supported arguments, and exit codes.
+This builds the Release executable, exports it together with the full Qt runtime to `standalone/ISO-Integrity-Check`, and creates `standalone/ISO-Integrity-Check-<version>.zip`. The `standalone/` folder is regenerated on each run and is not tracked in git.
+
+## Performance
+
+Hashing uses the Windows CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it, and overlaps file reading with hashing for large ISO files. On other platforms it falls back to Qt's `QCryptographicHash`.
 
 ## Supported Hashes
 
@@ -33,7 +62,7 @@ SHA1 and MD5 are included for older ISO sources, but they are not considered str
 
 ## Supported Checksum Files
 
-The GUI checksum import button and the separate CLI support common checksum files such as:
+The app can import common checksum files such as:
 
 - `.sha256`
 - `.sha512`
@@ -42,16 +71,15 @@ The GUI checksum import button and the separate CLI support common checksum file
 - `.txt`
 - `*SUMS`
 
-The app can parse plain checksum files containing only a hash, plus GNU-style files such as:
+It supports plain checksum files, GNU-style files, and BSD-style files:
 
 ```text
 f2ca1bb6c7e907d06dafe4687e579fce  example.iso
 f2ca1bb6c7e907d06dafe4687e579fce *example.iso
+SHA256 (example.iso) = f2ca1bb6c7e907d06dafe4687e579fce
 ```
 
-If the checksum file contains multiple entries, the app prefers the line matching the selected ISO filename. If no filename matches, it uses the first supported checksum it finds.
-
-Checksum import is intended for small text checksum files. Files larger than 1 MB are rejected to keep the desktop UI responsive.
+If a checksum file contains multiple entries, the app prefers the line matching the selected ISO filename. If no filename matches, it uses the first supported checksum it finds. Checksum files larger than 1 MB are rejected.
 
 ## How To Use
 
@@ -60,16 +88,18 @@ Checksum import is intended for small text checksum files. Files larger than 1 M
 3. Paste the expected checksum if you are not importing it from a checksum file.
 4. Click **Calculate / Verify**.
 
-The tool streams the file in chunks, so large ISO files are not loaded fully into memory. If no expected checksum is pasted, the app will still calculate and show the selected hash.
-
-You can right-click the text fields to cut, copy, paste, or select text.
+The app streams files in chunks, so large ISO files are not loaded fully into memory. If no expected checksum is pasted, it will still calculate and show the selected hash.
 
 Only trust checksums published by the official operating system or vendor download page.
 
-## Tests
+## Legacy Versions
 
-Run the test suite with:
+- Python GUI: `legacy/python/main.py`
+- Python tests: `legacy/python/test_main.py`
+- PowerShell CLI: `legacy/cli/iso-integrity-check.cmd`
+
+Run the legacy Python tests with:
 
 ```powershell
-python -m unittest
+python -m unittest discover -s legacy\python
 ```

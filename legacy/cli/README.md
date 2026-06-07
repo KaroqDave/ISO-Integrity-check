@@ -1,6 +1,8 @@
-# ISO Integrity Check CLI
+# Legacy ISO Integrity Check CLI
 
 A zero-Python command-line version of ISO Integrity Check for Windows Terminal, Command Prompt, and PowerShell.
+
+This CLI is preserved as a legacy implementation. The C++/Qt app at the repository root is now the primary version.
 
 The CLI uses Windows PowerShell's built-in `Get-FileHash`, so users do not need Python or external packages installed.
 
@@ -10,6 +12,12 @@ Open Windows Terminal in this folder and use the `.cmd` launcher:
 
 ```powershell
 .\iso-integrity-check.cmd -File "C:\Downloads\example.iso" -ChecksumFile "C:\Downloads\SHA256SUMS"
+```
+
+From the repository root, run:
+
+```powershell
+.\legacy\cli\iso-integrity-check.cmd -File "C:\Downloads\example.iso" -ChecksumFile "C:\Downloads\SHA256SUMS"
 ```
 
 You can also run the PowerShell script directly:
