@@ -1,0 +1,23 @@
+# Normalize line endings: store text as LF in the repo, check out native on Windows.
+* text=auto
+
+# Source and docs are text.
+*.cpp   text
+*.h     text
+*.md    text
+*.txt   text
+*.qrc   text
+*.svg   text
+*.cmake text
+*.yml   text
+*.yaml  text
+
+# Windows shell scripts work best with CRLF on checkout.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets must never be normalized.
+*.png binary
+*.ico binary
+*.zip binary

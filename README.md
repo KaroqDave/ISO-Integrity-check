@@ -1,8 +1,14 @@
 # ISO Integrity Check
 
+[![Build](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml/badge.svg)](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml)
+
 A Windows desktop app for checking ISO file integrity with trusted checksums.
 
 The primary implementation is now a C++/Qt app that builds to a native `.exe`. The older Python GUI and PowerShell CLI remain available under `legacy/`, but they are no longer the main development target.
+
+![ISO Integrity Check](docs/screenshot.png)
+
+> **Platform:** ISO Integrity Check is a Windows desktop application (MSVC + Qt 6, deployed with `windeployqt`). The core hashing keeps a portable `QCryptographicHash` fallback so the logic compiles elsewhere, but the packaged GUI targets Windows.
 
 ## Download (Ready To Run)
 
