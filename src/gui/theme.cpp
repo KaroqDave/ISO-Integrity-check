@@ -22,9 +22,9 @@ QString tokenReplace(QString tpl, const Palette& p)
     tpl.replace(QStringLiteral("@accentPressed"), hex(p.accentPressed));
     tpl.replace(QStringLiteral("@accentText"), hex(p.accentText));
     tpl.replace(QStringLiteral("@accent"), hex(p.accent));
-    tpl.replace(QStringLiteral("@chevron"),
-        p.isDark ? QStringLiteral(":/icons/chevron-down-dark.svg")
-                 : QStringLiteral(":/icons/chevron-down-light.svg"));
+    tpl.replace(
+        QStringLiteral("@chevron"),
+        p.isDark ? QStringLiteral(":/icons/chevron-down-dark.svg") : QStringLiteral(":/icons/chevron-down-light.svg"));
     return tpl;
 }
 
@@ -136,6 +136,13 @@ QLabel#title { font-size: 22pt; font-weight: 700; color: @text; }
 QLabel#subtitle { color: @mutedText; }
 QLabel#fieldLabel { color: @mutedText; font-weight: 600; }
 QLabel#footnote { color: @mutedText; }
+
+QTextEdit#mismatchDetail {
+    background: transparent;
+    color: @mutedText;
+    border: none;
+    padding: 0;
+}
 
 QLineEdit {
     background: @surfaceAlt;

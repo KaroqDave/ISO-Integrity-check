@@ -91,7 +91,7 @@ fi
 cmake "${cmake_args[@]}"
 
 step "Building"
-cmake --build "$BuildDir" --config "$CMAKE_BUILD_TYPE" --target iso-integrity-check
+cmake --build "$BuildDir" --config "$CMAKE_BUILD_TYPE" --target iso-integrity-check iso-integrity-check-cli
 
 step "Installing to AppDir"
 rm -rf "$AppDir"

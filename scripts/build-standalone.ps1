@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Builds the Release executable and exports a self-contained, ready-to-run
+    Builds the Release executables and exports a self-contained, ready-to-run
     bundle into standalone/ISO-Integrity-Check, then zips it for distribution.
 
 .DESCRIPTION
     Pipeline:
-      1. Configure + build the Release executable (windeployqt runs post-build).
+      1. Configure + build the Release executables (windeployqt runs post-build).
       2. Wipe standalone/ISO-Integrity-Check and repopulate it with the exe plus
          the full Qt runtime via `cmake --install`.
       3. Write a fresh README.txt next to the executable.
@@ -62,7 +62,7 @@ Write-Step "Configuring CMake"
 if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
 
 Write-Step "Building ($Config)"
-& cmake --build $BuildDir --config $Config --target iso-integrity-check
+& cmake --build $BuildDir --config $Config --target iso-integrity-check iso-integrity-check-cli
 if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
 Write-Step "Exporting standalone bundle"

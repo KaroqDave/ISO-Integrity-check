@@ -5,6 +5,10 @@
 #include <QApplication>
 #include <QIcon>
 
+#ifndef ISO_APP_VERSION
+#define ISO_APP_VERSION "0.0.0-dev"
+#endif
+
 namespace {
 
 struct LaunchOptions {
@@ -32,6 +36,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("KaroqDave"));
     QApplication::setApplicationName(QStringLiteral("ISO Integrity Check"));
+    QApplication::setApplicationVersion(QStringLiteral(ISO_APP_VERSION));
 
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/app.ico")));
 

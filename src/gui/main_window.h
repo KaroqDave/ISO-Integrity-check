@@ -6,7 +6,11 @@
 #include "gui/verification_controller.h"
 
 #include <QElapsedTimer>
+#include <QList>
 #include <QMainWindow>
+#include <QString>
+#include <QStringList>
+#include <QUrl>
 
 class QCloseEvent;
 class QComboBox;
@@ -20,12 +24,13 @@ class QLineEdit;
 class QProgressBar;
 class QPushButton;
 class QLabel;
+class QTextEdit;
 class QWidget;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
-public:
+  public:
     explicit MainWindow(iso::Theme initialTheme = iso::Theme::System, QWidget* parent = nullptr);
 
     void handleLaunchArgs(const QStringList& paths, bool autoVerify = false);
@@ -34,13 +39,13 @@ public:
     void handleSectionDragMove(QDragMoveEvent* event, QWidget* targetSection);
     void handleSectionDrop(QDropEvent* event, QWidget* targetSection);
 
-protected:
+  protected:
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
-private:
+  private:
     void buildUi();
     void setupShortcuts();
     void setupContextMenus();
@@ -70,7 +75,6 @@ private:
     void setStatus(iso::VerificationStatus status, const QString& message, const QString& detail = {});
     void setComputedHash(const QString& value);
     void copyComputedHash();
-    void copyExpectedChecksum();
     void clearAll();
     void showAbout();
     void toggleTheme();
@@ -97,13 +101,12 @@ private:
     QPushButton* verifyButton = nullptr;
     QPushButton* browseIsoButton = nullptr;
     QPushButton* importButton = nullptr;
-    QPushButton* copyExpectedButton = nullptr;
     QPushButton* clearButton = nullptr;
     QPushButton* themeButton = nullptr;
     QLabel* statusLabel = nullptr;
     QLabel* detailLabel = nullptr;
     QLabel* expectedHintLabel = nullptr;
-    QLabel* mismatchDiffLabel = nullptr;
+    QTextEdit* mismatchDetailView = nullptr;
     QGroupBox* fileSection = nullptr;
     QGroupBox* inputSection = nullptr;
 

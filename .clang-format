@@ -1,6 +1,12 @@
 BasedOnStyle: LLVM
 IndentWidth: 4
 ColumnLimit: 120
+PointerAlignment: Left
+AlignAfterOpenBracket: AlwaysBreak
+BinPackParameters: false
+BinPackArguments: false
 AllowShortFunctionsOnASingleLine: Inline
-BreakBeforeBraces: Attach
 SortIncludes: false
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true

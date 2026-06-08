@@ -33,6 +33,7 @@ std::optional<QString> validateExpectedChecksum(const QString& expectedChecksum,
 std::optional<QString> algorithmFromChecksumLength(qsizetype length);
 std::optional<ParsedChecksum> parseChecksumLine(const QString& line, int lineNumber);
 ParsedChecksum parseChecksumText(const QString& text, const QString& isoPath = {});
-ParsedChecksum loadChecksumFile(const QString& checksumFilePath, const QString& isoPath = {}, qint64 maxSize = MaxChecksumFileSize);
+ParsedChecksum
+loadChecksumFile(const QString& checksumFilePath, const QString& isoPath = {}, qint64 maxSize = MaxChecksumFileSize);
 
 } // namespace iso

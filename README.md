@@ -4,7 +4,7 @@
 
 A cross-platform desktop app for checking ISO file integrity with trusted checksums.
 
-The primary implementation is a C++/Qt 6 GUI. The older Python GUI and PowerShell CLI remain available under `legacy/`, but they are no longer the main development target.
+The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
@@ -37,36 +37,52 @@ The AppImage works on Ubuntu 22.04+, Fedora, Arch, and other recent x86_64 distr
 ./squashfs-root/AppRun
 ```
 
-## Build The C++ App
+## Build From Source
 
 Prerequisites:
 
 - CMake 3.21 or newer.
-- Qt 6.8 or newer with the `Core` and `Widgets` components.
+- Qt 6.8 or newer with the `Core` and `Widgets` components (plus `Test` to run the C++ tests).
+- A C++17 compiler: MSVC (Visual Studio 2022+) on Windows, or GCC/Clang on Linux.
 
-### Windows
-
-- Visual Studio 2022 with the MSVC C++ toolchain.
-
-Configure and build:
+Make sure CMake can find Qt. The simplest way is to point `CMAKE_PREFIX_PATH` at your Qt kit, either as an environment variable (recommended) or on the command line:
 
 ```powershell
+# Windows (PowerShell)
+$env:CMAKE_PREFIX_PATH = "C:\Qt\6.10.3\msvc2022_64"
+```
+
+```bash
+# Linux
+export CMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64
+```
+
+### Build with presets (recommended)
+
+The project ships a `CMakePresets.json`, so configuring and building is two commands:
+
+```bash
+cmake --preset windows   # use "linux" on Linux
+cmake --build --preset windows
+ctest --preset windows
+```
+
+The Windows build runs `windeployqt` afterwards, so Qt runtime DLLs and plugins are copied beside the executable. Output:
+
+- Windows: `build\Release\iso-integrity-check.exe`
+- Linux: `build/iso-integrity-check`
+
+### Build without presets
+
+```bash
 cmake -S . -B build -DCMAKE_PREFIX_PATH="C:\Qt\6.10.3\msvc2022_64"
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The executable is produced at:
+On Linux, add `-DCMAKE_BUILD_TYPE=Release`. If your Qt installation does not include the `Test` component, configure with `-DISO_BUILD_TESTS=OFF` to build just the apps.
 
-```text
-build\Release\iso-integrity-check.exe
-```
-
-The build runs `windeployqt` after compiling the GUI, so Qt runtime DLLs and plugins are copied beside the executable. Adjust `CMAKE_PREFIX_PATH` if your Qt version or kit path changes.
-
-### Linux
-
-Install development packages for your distro:
+Linux development packages by distro:
 
 | Distro | Packages |
 |--------|----------|
@@ -74,14 +90,15 @@ Install development packages for your distro:
 | Fedora | `qt6-qtbase-devel`, `cmake`, `gcc-c++`, `mesa-libGL-devel`, `libxkbcommon-devel` |
 | Arch | `qt6-base`, `cmake`, `gcc`, `mesa`, `libxkbcommon` |
 
-Configure and build:
+### Editor / IntelliSense setup (clangd)
 
-```bash
-cmake -S . -B build-linux -DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 -DCMAKE_BUILD_TYPE=Release
-cmake --build build-linux --config Release --target iso-integrity-check
+clangd resolves Qt and MSVC headers from a `compile_commands.json` file. On Linux, configuring (above) creates it in `build/` automatically. On Windows, the Visual Studio generator does not emit one, so run this once after cloning (and again when you add or move source files):
+
+```powershell
+./scripts/generate-compile-commands.ps1
 ```
 
-The executable is produced at `build-linux/iso-integrity-check`.
+It writes `compile_commands.json` to the repo root; reload the editor window afterwards.
 
 ### Headless CLI
 
@@ -92,20 +109,11 @@ build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --ex
 build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --checksum-file SHA256SUMS
 ```
 
-On Linux:
-
 ```bash
-./build-linux/iso-integrity-check-cli --file ./example.iso --algorithm SHA256
+./build/iso-integrity-check-cli --file ./example.iso --algorithm SHA256
 ```
 
 Exit codes: `0` = match or hash-only success, `1` = mismatch, `2` = error.
-
-### C++ Tests
-
-```powershell
-cmake --build build --config Release --target iso-core-tests
-ctest --test-dir build -C Release --output-on-failure
-```
 
 ## Standalone Build (Export For Distribution)
 
@@ -180,21 +188,3 @@ If a checksum file contains multiple entries, the app prefers the line matching 
 The app streams files in chunks, so large ISO files are not loaded fully into memory. If no expected checksum is pasted, it will still calculate and show the selected hash.
 
 Only trust checksums published by the official operating system or vendor download page.
-
-## Legacy Versions
-
-- Python GUI: `legacy/python/main.py`
-- Python tests: `legacy/python/test_main.py`
-- PowerShell CLI: `legacy/cli/iso-integrity-check.cmd`
-
-Run the legacy Python tests with:
-
-```powershell
-python -m unittest discover -s legacy\python
-```
-
-On Linux:
-
-```bash
-python -m unittest discover -s legacy/python
-```

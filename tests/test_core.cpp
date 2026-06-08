@@ -5,7 +5,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
-#include <QTest>
+#include <QtTest>
 
 using namespace iso;
 

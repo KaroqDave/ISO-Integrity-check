@@ -3,16 +3,14 @@
 #include "core/verifier.h"
 
 #include <QObject>
-
-#include <atomic>
-#include <memory>
+#include <QString>
 
 class QThread;
 
 class VerificationController : public QObject {
     Q_OBJECT
 
-public:
+  public:
     explicit VerificationController(QObject* parent = nullptr);
     ~VerificationController() override;
 
@@ -27,11 +25,11 @@ public:
 
     void cancel();
 
-signals:
+  signals:
     void progressUpdated(quint64 jobToken, qint64 bytesRead);
     void finished(quint64 jobToken, const iso::VerificationResult& result);
 
-private:
+  private:
     bool running_ = false;
     quint64 activeJobToken_ = 0;
     iso::CancelToken activeCancelToken_;

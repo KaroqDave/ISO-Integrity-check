@@ -1,0 +1,8 @@
+# clangd reads the real Qt/MSVC include paths from compile_commands.json.
+# On Windows, generate it with scripts/generate-compile-commands.ps1.
+# On Linux, configuring with `cmake --preset linux` produces it in build/.
+# The flags below are only a fallback for files not yet in that database.
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -Isrc

@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
 if(WIN32)
-    project(ISOIntegrityCheck VERSION 1.1.0 LANGUAGES CXX RC)
+    project(ISOIntegrityCheck VERSION 1.1.1 LANGUAGES CXX RC)
 else()
-    project(ISOIntegrityCheck VERSION 1.1.0 LANGUAGES CXX)
+    project(ISOIntegrityCheck VERSION 1.1.1 LANGUAGES CXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -15,7 +15,31 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test)
+option(ISO_BUILD_TESTS "Build ISO Integrity Check C++ tests" ON)
+
+# Fallback Qt discovery: when configuring without a preset or CMAKE_PREFIX_PATH
+# (e.g. straight from an IDE), auto-locate a complete Qt MSVC kit installed under
+# C:/Qt so find_package(Qt6) works out of the box. Skipped if Qt is already
+# pointed at via Qt6_DIR, CMAKE_PREFIX_PATH, or the matching environment variable.
+if(WIN32 AND NOT Qt6_DIR AND NOT CMAKE_PREFIX_PATH AND NOT DEFINED ENV{CMAKE_PREFIX_PATH})
+    file(GLOB _iso_qt_configs
+        "C:/Qt/*/msvc*_64/lib/cmake/Qt6/Qt6Config.cmake")
+    if(_iso_qt_configs)
+        list(SORT _iso_qt_configs COMPARE NATURAL)
+        list(LENGTH _iso_qt_configs _iso_qt_count)
+        math(EXPR _iso_qt_last "${_iso_qt_count} - 1")
+        list(GET _iso_qt_configs ${_iso_qt_last} _iso_qt_config)
+        get_filename_component(_iso_qt_cmake_dir "${_iso_qt_config}" DIRECTORY)
+        get_filename_component(_iso_qt_prefix "${_iso_qt_cmake_dir}/../../.." ABSOLUTE)
+        list(APPEND CMAKE_PREFIX_PATH "${_iso_qt_prefix}")
+        message(STATUS "Auto-detected Qt at ${_iso_qt_prefix}")
+    endif()
+endif()
+
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
+if(ISO_BUILD_TESTS)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+endif()
 get_filename_component(QT_INSTALL_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
 
 set(ISO_CORE_SOURCES
@@ -46,6 +70,7 @@ endif()
 
 target_include_directories(iso-integrity-check PRIVATE src)
 target_link_libraries(iso-integrity-check PRIVATE Qt6::Core Qt6::Widgets)
+target_compile_definitions(iso-integrity-check PRIVATE ISO_APP_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)
     target_link_libraries(iso-integrity-check PRIVATE bcrypt)
@@ -67,28 +92,31 @@ endif()
 add_executable(iso-integrity-check-cli ${ISO_CORE_SOURCES} src/cli/main.cpp)
 target_include_directories(iso-integrity-check-cli PRIVATE src)
 target_link_libraries(iso-integrity-check-cli PRIVATE Qt6::Core)
+target_compile_definitions(iso-integrity-check-cli PRIVATE ISO_APP_VERSION="${PROJECT_VERSION}")
 
 if(WIN32)
     target_link_libraries(iso-integrity-check-cli PRIVATE bcrypt)
 endif()
 
-enable_testing()
+if(ISO_BUILD_TESTS)
+    enable_testing()
 
-add_executable(iso-core-tests
-    ${ISO_CORE_SOURCES}
-    tests/test_core.cpp
-)
-target_include_directories(iso-core-tests PRIVATE src)
-target_link_libraries(iso-core-tests PRIVATE Qt6::Core Qt6::Test)
+    add_executable(iso-core-tests
+        ${ISO_CORE_SOURCES}
+        tests/test_core.cpp
+    )
+    target_include_directories(iso-core-tests PRIVATE src)
+    target_link_libraries(iso-core-tests PRIVATE Qt6::Core Qt6::Test)
 
-if(WIN32)
-    target_link_libraries(iso-core-tests PRIVATE bcrypt)
-endif()
+    if(WIN32)
+        target_link_libraries(iso-core-tests PRIVATE bcrypt)
+    endif()
 
-add_test(NAME iso-core-tests COMMAND iso-core-tests)
-if(WIN32)
-    set_tests_properties(iso-core-tests PROPERTIES
-        ENVIRONMENT "PATH=${QT_INSTALL_PREFIX}/bin;$ENV{PATH}")
+    add_test(NAME iso-core-tests COMMAND iso-core-tests)
+    if(WIN32)
+        set_tests_properties(iso-core-tests PROPERTIES
+            ENVIRONMENT "PATH=${QT_INSTALL_PREFIX}/bin;$ENV{PATH}")
+    endif()
 endif()
 
 if(WIN32)

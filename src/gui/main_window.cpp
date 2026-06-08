@@ -28,7 +28,9 @@
 #include <QMimeData>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QSettings>
+#include <QScrollArea>
+#include <QTextEdit>
+#include <QTextDocument>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSize>
@@ -40,12 +42,14 @@
 
 #include <exception>
 
+#ifndef ISO_APP_VERSION
+#define ISO_APP_VERSION "0.0.0-dev"
+#endif
+
 namespace {
 
 constexpr auto AppAuthor = "KaroqDave";
 constexpr auto AppProfileUrl = "https://github.com/KaroqDave";
-constexpr auto SettingsOrganization = "KaroqDave";
-constexpr auto SettingsApplication = "ISO Integrity Check";
 
 QGroupBox* card(const QString& title)
 {
@@ -95,9 +99,7 @@ void setupAlgorithmCombo(QComboBox* combo)
     const auto hashes = iso::supportedHashes();
     for (const QString& name : iso::supportedHashNames()) {
         const iso::HashDetails& details = hashes.value(name);
-        const QString display = details.legacy
-            ? QStringLiteral("%1 (legacy)").arg(name)
-            : name;
+        const QString display = details.legacy ? QStringLiteral("%1 (legacy)").arg(name) : name;
         combo->addItem(display, name);
     }
     combo->setCursor(Qt::PointingHandCursor);
@@ -129,7 +131,8 @@ QString formatByteSize(qint64 bytes)
     if (suffixIndex == 0) {
         return QStringLiteral("%1 B").arg(bytes);
     }
-    return QStringLiteral("%1 %2").arg(QString::number(value, 'f', suffixIndex >= 3 ? 2 : 1), QString::fromLatin1(suffixes[suffixIndex]));
+    return QStringLiteral("%1 %2").arg(
+        QString::number(value, 'f', suffixIndex >= 3 ? 2 : 1), QString::fromLatin1(suffixes[suffixIndex]));
 }
 
 QString formatProgressDetail(qint64 bytesRead, qint64 totalBytes, double bytesPerSecond = -1.0)
@@ -139,9 +142,8 @@ QString formatProgressDetail(qint64 bytesRead, qint64 totalBytes, double bytesPe
     }
 
     const int percent = static_cast<int>((bytesRead * 100) / totalBytes);
-    QString detail = QStringLiteral("%1 / %2 (%3%)")
-        .arg(formatByteSize(bytesRead), formatByteSize(totalBytes))
-        .arg(percent);
+    QString detail =
+        QStringLiteral("%1 / %2 (%3%)").arg(formatByteSize(bytesRead), formatByteSize(totalBytes)).arg(percent);
 
     if (bytesPerSecond > 0.0) {
         detail += QStringLiteral(" · %1/s").arg(formatByteSize(static_cast<qint64>(bytesPerSecond)));
@@ -160,15 +162,13 @@ QString formatProgressDetail(qint64 bytesRead, qint64 totalBytes, double bytesPe
 }
 
 class DropTargetEventFilter : public QObject {
-public:
+  public:
     DropTargetEventFilter(MainWindow* window, QWidget* targetSection)
-        : QObject(targetSection)
-        , window_(window)
-        , targetSection_(targetSection)
+        : QObject(targetSection), window_(window), targetSection_(targetSection)
     {
     }
 
-protected:
+  protected:
     bool eventFilter(QObject* watched, QEvent* event) override
     {
         Q_UNUSED(watched);
@@ -187,7 +187,7 @@ protected:
         }
     }
 
-private:
+  private:
     MainWindow* window_ = nullptr;
     QWidget* targetSection_ = nullptr;
 };
@@ -223,9 +223,7 @@ void addLineEditContextMenu(QLineEdit* edit, bool readOnlyMenu = false)
 
 } // namespace
 
-MainWindow::MainWindow(iso::Theme initialTheme, QWidget* parent)
-    : QMainWindow(parent)
-    , currentTheme(initialTheme)
+MainWindow::MainWindow(iso::Theme initialTheme, QWidget* parent) : QMainWindow(parent), currentTheme(initialTheme)
 {
     setWindowTitle(QStringLiteral("ISO Integrity Check"));
     setMinimumSize(820, 600);
@@ -237,15 +235,21 @@ MainWindow::MainWindow(iso::Theme initialTheme, QWidget* parent)
     loadSettings();
     applyCurrentTheme();
 
-    connect(&verificationController, &VerificationController::progressUpdated, this, [this](quint64 jobToken, qint64 bytesRead) {
-        if (jobToken != activeJobToken) {
-            return;
-        }
-        updateProgress(bytesRead);
-    });
-    connect(&verificationController, &VerificationController::finished, this, [this](quint64 jobToken, const iso::VerificationResult& result) {
-        finishVerification(result, jobToken);
-    });
+    connect(
+        &verificationController,
+        &VerificationController::progressUpdated,
+        this,
+        [this](quint64 jobToken, qint64 bytesRead) {
+            if (jobToken != activeJobToken) {
+                return;
+            }
+            updateProgress(bytesRead);
+        });
+    connect(
+        &verificationController,
+        &VerificationController::finished,
+        this,
+        [this](quint64 jobToken, const iso::VerificationResult& result) { finishVerification(result, jobToken); });
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (auto* hints = QApplication::styleHints()) {
@@ -260,7 +264,12 @@ MainWindow::MainWindow(iso::Theme initialTheme, QWidget* parent)
 
 void MainWindow::buildUi()
 {
-    auto* central = new QWidget(this);
+    auto* scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* central = new QWidget;
     auto* mainLayout = new QVBoxLayout(central);
     mainLayout->setContentsMargins(28, 24, 28, 20);
     mainLayout->setSpacing(16);
@@ -274,7 +283,8 @@ void MainWindow::buildUi()
     mainLayout->addWidget(buildFooterWarning());
     mainLayout->addStretch();
 
-    setCentralWidget(central);
+    scroll->setWidget(central);
+    setCentralWidget(scroll);
     refreshStatusBadge();
 }
 
@@ -401,11 +411,8 @@ QWidget* MainWindow::buildInputSection()
     inputLayout->addWidget(fieldLabel(QStringLiteral("Hash type")), 0, 0);
     inputLayout->addWidget(algorithmCombo, 0, 1);
     inputLayout->addWidget(importButton, 0, 2, Qt::AlignRight);
-    copyExpectedButton = styledButton(QStringLiteral("Copy expected checksum"), "secondary");
-    connect(copyExpectedButton, &QPushButton::clicked, this, &MainWindow::copyExpectedChecksum);
     inputLayout->addWidget(fieldLabel(QStringLiteral("Expected checksum")), 1, 0);
-    inputLayout->addWidget(expectedEdit, 1, 1);
-    inputLayout->addWidget(copyExpectedButton, 1, 2, Qt::AlignRight);
+    inputLayout->addWidget(expectedEdit, 1, 1, 1, 2);
     inputLayout->addWidget(expectedHintLabel, 2, 1, 1, 2);
     inputLayout->setColumnStretch(1, 1);
     return inputSection;
@@ -439,19 +446,25 @@ QWidget* MainWindow::buildResultSection()
     statusLabel = new QLabel(QStringLiteral("Select an ISO file, then paste or import a checksum."));
     statusLabel->setObjectName(QStringLiteral("statusBadge"));
     statusLabel->setWordWrap(true);
+    statusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     statusLabel->setAccessibleName(QStringLiteral("Verification status"));
     detailLabel = new QLabel(QStringLiteral("Ready"));
     detailLabel->setObjectName(QStringLiteral("footnote"));
     detailLabel->setWordWrap(true);
     detailLabel->setAccessibleName(QStringLiteral("Verification details"));
-    mismatchDiffLabel = new QLabel;
-    mismatchDiffLabel->setObjectName(QStringLiteral("footnote"));
-    mismatchDiffLabel->setWordWrap(true);
-    mismatchDiffLabel->setTextFormat(Qt::RichText);
-    mismatchDiffLabel->setVisible(false);
-    resultLayout->addWidget(statusLabel);
-    resultLayout->addWidget(detailLabel);
-    resultLayout->addWidget(mismatchDiffLabel);
+    mismatchDetailView = new QTextEdit;
+    mismatchDetailView->setObjectName(QStringLiteral("mismatchDetail"));
+    mismatchDetailView->setReadOnly(true);
+    mismatchDetailView->setFrameShape(QFrame::NoFrame);
+    mismatchDetailView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mismatchDetailView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mismatchDetailView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    mismatchDetailView->document()->setDocumentMargin(0);
+    mismatchDetailView->setFixedHeight(0);
+    mismatchDetailView->setVisible(false);
+    resultLayout->addWidget(statusLabel, 0, Qt::AlignTop);
+    resultLayout->addWidget(detailLabel, 0, Qt::AlignTop);
+    resultLayout->addWidget(mismatchDetailView, 0, Qt::AlignTop);
     return resultBox;
 }
 
@@ -473,7 +486,8 @@ QWidget* MainWindow::buildComputedSection()
 
 QWidget* MainWindow::buildFooterWarning()
 {
-    auto* warning = new QLabel(QStringLiteral("Only trust checksums from the official operating system or vendor download page. SHA1 and MD5 are legacy options."));
+    auto* warning = new QLabel(QStringLiteral("Only trust checksums from the official operating system or vendor "
+                                              "download page. SHA1 and MD5 are legacy options."));
     warning->setObjectName(QStringLiteral("footnote"));
     warning->setWordWrap(true);
     return warning;
@@ -487,10 +501,7 @@ void MainWindow::browseIsoFile()
         iso::browseStartDirectory(appSettings.lastIsoDir),
         QStringLiteral("ISO files (*.iso)"));
     if (!selected.isEmpty()) {
-        if (trySetIsoFile(selected)) {
-            appSettings.lastIsoDir = QFileInfo(selected).absolutePath();
-            saveSettings();
-        }
+        trySetIsoFile(selected);
     }
 }
 
@@ -513,9 +524,7 @@ bool MainWindow::trySetIsoFile(const QString& path)
     const QFileInfo info(path);
     if (!info.exists() || !info.isFile()) {
         QMessageBox::warning(
-            this,
-            QStringLiteral("ISO file"),
-            QStringLiteral("The selected path is not an existing file."));
+            this, QStringLiteral("ISO file"), QStringLiteral("The selected path is not an existing file."));
         return false;
     }
 
@@ -529,7 +538,8 @@ void MainWindow::setIsoFile(const QString& path)
 {
     fileEdit->setText(path);
     fileEdit->setToolTip(path);
-    setStatus(iso::VerificationStatus::Generated, QStringLiteral("ISO selected. Paste or import the matching checksum."));
+    setStatus(
+        iso::VerificationStatus::Generated, QStringLiteral("ISO selected. Paste or import the matching checksum."));
     updateExpectedValidation();
 }
 
@@ -541,28 +551,21 @@ void MainWindow::browseChecksumFile()
         iso::browseStartDirectory(appSettings.lastChecksumDir),
         QStringLiteral("Checksum files (*.sha256 *.sha512 *.sha1 *.md5 *.txt *SUMS)"));
     if (!selected.isEmpty()) {
-        if (tryImportChecksumFile(selected)) {
-            appSettings.lastChecksumDir = QFileInfo(selected).absolutePath();
-            saveSettings();
-        }
+        tryImportChecksumFile(selected);
     }
 }
 
 bool MainWindow::tryImportChecksumFile(const QString& path)
 {
     if (!isChecksumPath(path)) {
-        rejectWrongFileType(
-            path,
-            QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
+        rejectWrongFileType(path, QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
         return false;
     }
 
     const QFileInfo info(path);
     if (!info.exists() || !info.isFile()) {
         QMessageBox::warning(
-            this,
-            QStringLiteral("Checksum file"),
-            QStringLiteral("The selected path is not an existing file."));
+            this, QStringLiteral("Checksum file"), QStringLiteral("The selected path is not an existing file."));
         return false;
     }
 
@@ -580,14 +583,21 @@ void MainWindow::importChecksumFile(const QString& path)
         expectedEdit->setText(parsed.checksum);
 
         const QString source = QFileInfo(path).fileName();
-        const QString detail = parsed.filename.isEmpty()
-            ? QStringLiteral("Imported %1 from %2, line %3.").arg(parsed.algorithm, source).arg(parsed.lineNumber)
-            : QStringLiteral("Imported %1 from %2, line %3: %4").arg(parsed.algorithm, source).arg(parsed.lineNumber).arg(parsed.filename);
+        const QString detail =
+            parsed.filename.isEmpty()
+                ? QStringLiteral("Imported %1 from %2, line %3.").arg(parsed.algorithm, source).arg(parsed.lineNumber)
+                : QStringLiteral("Imported %1 from %2, line %3: %4")
+                      .arg(parsed.algorithm, source)
+                      .arg(parsed.lineNumber)
+                      .arg(parsed.filename);
         setStatus(iso::VerificationStatus::Generated, QStringLiteral("Checksum imported."), detail);
         updateExpectedValidation();
     } catch (const std::exception& error) {
         QMessageBox::critical(this, QStringLiteral("Checksum file"), QString::fromUtf8(error.what()));
-        setStatus(iso::VerificationStatus::Error, QStringLiteral("Checksum file could not be imported."), QString::fromUtf8(error.what()));
+        setStatus(
+            iso::VerificationStatus::Error,
+            QStringLiteral("Checksum file could not be imported."),
+            QString::fromUtf8(error.what()));
     }
 }
 
@@ -619,16 +629,14 @@ void MainWindow::startVerification()
     const QFileInfo fileInfo(filePath);
     if (!fileInfo.exists() || !fileInfo.isFile()) {
         QMessageBox::warning(
-            this,
-            QStringLiteral("ISO file"),
-            QStringLiteral("The selected path is not an existing ISO file."));
+            this, QStringLiteral("ISO file"), QStringLiteral("The selected path is not an existing ISO file."));
         return;
     }
 
     verificationFileSize = fileInfo.exists() ? fileInfo.size() : 0;
     activeVerificationSummary = fileInfo.exists()
-        ? QStringLiteral("Verifying: %1 (%2)...").arg(fileInfo.fileName(), algorithm)
-        : QStringLiteral("Verifying selected file (%1)...").arg(algorithm);
+                                    ? QStringLiteral("Verifying: %1 (%2)...").arg(fileInfo.fileName(), algorithm)
+                                    : QStringLiteral("Verifying selected file (%1)...").arg(algorithm);
 
     const quint64 jobToken = nextJobToken();
     activeJobToken = jobToken;
@@ -693,17 +701,11 @@ void MainWindow::finishVerification(const iso::VerificationResult& result, quint
             firstDiff = length;
         }
         if (firstDiff >= 0) {
-            detail = QStringLiteral("%1 First difference at character %2 (1-based).")
-                .arg(detail)
-                .arg(firstDiff + 1);
+            detail = QStringLiteral("%1 First difference at character %2 (1-based).").arg(detail).arg(firstDiff + 1);
         }
         setStatus(result.status, result.message, detail);
     } else {
         clearMismatchHighlight();
-        if (mismatchDiffLabel) {
-            mismatchDiffLabel->clear();
-            mismatchDiffLabel->setVisible(false);
-        }
         setStatus(result.status, result.message, resultDetail(result));
     }
     if (!result.computedHash.isEmpty()) {
@@ -783,18 +785,6 @@ void MainWindow::copyComputedHash()
     detailLabel->setText(QStringLiteral("Computed checksum copied to the clipboard."));
 }
 
-void MainWindow::copyExpectedChecksum()
-{
-    const QString value = expectedEdit->text().trimmed();
-    if (value.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("No checksum"), QStringLiteral("Paste or import an expected checksum first."));
-        return;
-    }
-
-    QApplication::clipboard()->setText(value);
-    detailLabel->setText(QStringLiteral("Expected checksum copied to the clipboard."));
-}
-
 void MainWindow::awaitActiveWorker(int timeoutMs)
 {
     if (verificationController.isRunning()) {
@@ -821,16 +811,20 @@ void MainWindow::clearAll()
     algorithmCombo->setCurrentIndex(0);
     clearMismatchHighlight();
     updateExpectedValidation();
-    setStatus(iso::VerificationStatus::Generated, QStringLiteral("Select an ISO file, then paste or import a checksum."), QStringLiteral("Ready"));
+    setStatus(
+        iso::VerificationStatus::Generated,
+        QStringLiteral("Select an ISO file, then paste or import a checksum."),
+        QStringLiteral("Ready"));
 }
 
 void MainWindow::showAbout()
 {
     QMessageBox aboutBox(this);
     aboutBox.setWindowTitle(QStringLiteral("About ISO Integrity Check"));
-    aboutBox.setText(QStringLiteral("ISO Integrity Check"));
+    aboutBox.setText(QStringLiteral("ISO Integrity Check %1").arg(QString::fromLatin1(ISO_APP_VERSION)));
     aboutBox.setInformativeText(
-        QStringLiteral("Created by %1\n\nVerify ISO downloads with SHA512, SHA256, SHA1, and MD5 checksums.\n\nSHA1 and MD5 are legacy options. Prefer SHA256 or SHA512 from an official source.")
+        QStringLiteral("Created by %1\n\nVerify ISO downloads with SHA512, SHA256, SHA1, and MD5 checksums.\n\nSHA1 "
+                       "and MD5 are legacy options. Prefer SHA256 or SHA512 from an official source.")
             .arg(QString::fromLatin1(AppAuthor)));
     aboutBox.setStandardButtons(QMessageBox::Ok);
     QPushButton* githubButton = aboutBox.addButton(QStringLiteral("Open GitHub"), QMessageBox::ActionRole);
@@ -875,13 +869,13 @@ void MainWindow::refreshStatusBadge()
     const QColor bg = iso::statusBadgeBackground(currentStatus, palette);
     const QColor fg = iso::statusBadgeText(currentStatus, palette);
 
-    statusLabel->setStyleSheet(QStringLiteral(
-        "QLabel#statusBadge { background: rgba(%1, %2, %3, %4); color: %5; border-radius: 8px; padding: 8px 12px; font-weight: 700; }")
-        .arg(bg.red())
-        .arg(bg.green())
-        .arg(bg.blue())
-        .arg(bg.alpha())
-        .arg(fg.name(QColor::HexRgb)));
+    statusLabel->setStyleSheet(QStringLiteral("QLabel#statusBadge { background: rgba(%1, %2, %3, %4); color: %5; "
+                                              "border-radius: 8px; padding: 8px 12px; font-weight: 700; }")
+                                   .arg(bg.red())
+                                   .arg(bg.green())
+                                   .arg(bg.blue())
+                                   .arg(bg.alpha())
+                                   .arg(fg.name(QColor::HexRgb)));
 }
 
 void MainWindow::updateExpectedValidation(bool autoDetectAlgorithm)
@@ -925,9 +919,16 @@ void MainWindow::applyMismatchHighlight(const QString& expected, const QString& 
 {
     const iso::ColorScheme scheme = iso::resolveColorScheme(currentTheme);
     const iso::Palette& palette = iso::paletteFor(scheme);
-    computedEdit->setStyleSheet(QStringLiteral("QLineEdit { border: 1px solid %1; }").arg(palette.statusMismatch.name(QColor::HexRgb)));
+    const QString borderStyle =
+        QStringLiteral("QLineEdit { border: 1px solid %1; }").arg(palette.statusMismatch.name(QColor::HexRgb));
+    if (expectedEdit) {
+        expectedEdit->setStyleSheet(borderStyle);
+    }
+    if (computedEdit) {
+        computedEdit->setStyleSheet(borderStyle);
+    }
 
-    if (!mismatchDiffLabel) {
+    if (!mismatchDetailView) {
         return;
     }
 
@@ -939,10 +940,10 @@ void MainWindow::applyMismatchHighlight(const QString& expected, const QString& 
         if (index < 0 || index >= value.size()) {
             return value.toHtmlEscaped();
         }
-        return value.left(index).toHtmlEscaped()
-            + QStringLiteral("<span style=\"color:%1;font-weight:700;\">%2</span>")
-                  .arg(mismatchColor, QString(value.at(index)).toHtmlEscaped())
-            + value.mid(index + 1).toHtmlEscaped();
+        return value.left(index).toHtmlEscaped() +
+               QStringLiteral("<span style=\"color:%1;font-weight:700;\">%2</span>")
+                   .arg(mismatchColor, QString(value.at(index)).toHtmlEscaped()) +
+               value.mid(index + 1).toHtmlEscaped();
     };
 
     qsizetype firstDiff = -1;
@@ -957,21 +958,33 @@ void MainWindow::applyMismatchHighlight(const QString& expected, const QString& 
         firstDiff = compareLength;
     }
 
-    const QString expectedHtml = firstDiff >= 0 ? highlightAt(normalizedExpected, firstDiff) : normalizedExpected.toHtmlEscaped();
-    const QString computedHtml = firstDiff >= 0 ? highlightAt(normalizedComputed, firstDiff) : normalizedComputed.toHtmlEscaped();
-    mismatchDiffLabel->setText(
-        QStringLiteral("<b>Expected:</b> %1<br><b>Computed:</b> %2").arg(expectedHtml, computedHtml));
-    mismatchDiffLabel->setVisible(true);
+    const QString expectedHtml =
+        firstDiff >= 0 ? highlightAt(normalizedExpected, firstDiff) : normalizedExpected.toHtmlEscaped();
+    const QString computedHtml =
+        firstDiff >= 0 ? highlightAt(normalizedComputed, firstDiff) : normalizedComputed.toHtmlEscaped();
+    mismatchDetailView->setHtml(QStringLiteral("<div style=\"word-wrap:break-word; word-break:break-all;\">"
+                                               "<p style=\"margin:0;\"><b>Expected:</b> %1</p>"
+                                               "<p style=\"margin:6px 0 0 0;\"><b>Computed:</b> %2</p>"
+                                               "</div>")
+                                    .arg(expectedHtml, computedHtml));
+
+    const qreal docHeight = mismatchDetailView->document()->size().height();
+    mismatchDetailView->setFixedHeight(static_cast<int>(qCeil(docHeight)) + 4);
+    mismatchDetailView->setVisible(true);
 }
 
 void MainWindow::clearMismatchHighlight()
 {
+    if (expectedEdit) {
+        expectedEdit->setStyleSheet({});
+    }
     if (computedEdit) {
         computedEdit->setStyleSheet({});
     }
-    if (mismatchDiffLabel) {
-        mismatchDiffLabel->clear();
-        mismatchDiffLabel->setVisible(false);
+    if (mismatchDetailView) {
+        mismatchDetailView->clear();
+        mismatchDetailView->setFixedHeight(0);
+        mismatchDetailView->setVisible(false);
     }
 }
 
@@ -1028,12 +1041,9 @@ bool MainWindow::isIsoPath(const QString& path) const
 bool MainWindow::isChecksumPath(const QString& path) const
 {
     const QString lower = path.toLower();
-    return lower.endsWith(QStringLiteral(".sha256"))
-        || lower.endsWith(QStringLiteral(".sha512"))
-        || lower.endsWith(QStringLiteral(".sha1"))
-        || lower.endsWith(QStringLiteral(".md5"))
-        || lower.endsWith(QStringLiteral(".txt"))
-        || lower.endsWith(QStringLiteral("sums"));
+    return lower.endsWith(QStringLiteral(".sha256")) || lower.endsWith(QStringLiteral(".sha512")) ||
+           lower.endsWith(QStringLiteral(".sha1")) || lower.endsWith(QStringLiteral(".md5")) ||
+           lower.endsWith(QStringLiteral(".txt")) || lower.endsWith(QStringLiteral("sums"));
 }
 
 bool MainWindow::acceptDragUrls(const QMimeData* mimeData, QWidget* targetWidget) const
@@ -1114,8 +1124,7 @@ void MainWindow::processDroppedUrls(const QList<QUrl>& urls, QWidget* targetWidg
         }
         if (!firstUnsupported.isEmpty()) {
             rejectWrongFileType(
-                firstUnsupported,
-                QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
+                firstUnsupported, QStringLiteral("a checksum file (.sha256, .sha512, .sha1, .md5, .txt, or *SUMS)"));
         }
         return;
     }

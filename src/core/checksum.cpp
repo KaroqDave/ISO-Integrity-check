@@ -3,8 +3,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include <QStringConverter>
-#include <QTextStream>
 
 #include <stdexcept>
 
@@ -12,8 +10,8 @@ namespace iso {
 namespace {
 
 const QRegularExpression HexPattern(QStringLiteral("^[0-9a-f]+$"));
-const QRegularExpression ChecksumTokenPattern(
-    QStringLiteral("(?<![0-9a-fA-F])([0-9a-fA-F]{128}|[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})(?![0-9a-fA-F])"));
+const QRegularExpression ChecksumTokenPattern(QStringLiteral(
+    "(?<![0-9a-fA-F])([0-9a-fA-F]{128}|[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{32})(?![0-9a-fA-F])"));
 const QRegularExpression BsdFilenamePattern(QStringLiteral("^[A-Za-z0-9-]+\\s*\\((.+)\\)\\s*=$"));
 
 QString extractChecksumFilename(const QString& line, qsizetype tokenStart, qsizetype tokenEnd)
@@ -196,7 +194,8 @@ ParsedChecksum loadChecksumFile(const QString& checksumFilePath, const QString& 
 
     QFile file(checksumFilePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        throw std::runtime_error(QStringLiteral("The selected checksum file could not be opened: %1").arg(file.errorString()).toStdString());
+        throw std::runtime_error(
+            QStringLiteral("The selected checksum file could not be opened: %1").arg(file.errorString()).toStdString());
     }
 
     QByteArray data = file.readAll();

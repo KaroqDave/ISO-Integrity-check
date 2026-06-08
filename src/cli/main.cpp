@@ -3,8 +3,11 @@
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
-#include <QFileInfo>
 #include <QTextStream>
+
+#ifndef ISO_APP_VERSION
+#define ISO_APP_VERSION "0.0.0-dev"
+#endif
 
 namespace {
 
@@ -38,10 +41,23 @@ CliOptions parseOptions(QCoreApplication& app)
     parser.addHelpOption();
     parser.addVersionOption();
 
-    QCommandLineOption fileOption(QStringList{QStringLiteral("f"), QStringLiteral("file")}, QStringLiteral("ISO file to verify."), QStringLiteral("path"));
-    QCommandLineOption expectedOption(QStringList{QStringLiteral("e"), QStringLiteral("expected")}, QStringLiteral("Expected checksum value."), QStringLiteral("hash"));
-    QCommandLineOption checksumFileOption(QStringList{QStringLiteral("c"), QStringLiteral("checksum-file")}, QStringLiteral("Checksum file to import."), QStringLiteral("path"));
-    QCommandLineOption algorithmOption(QStringList{QStringLiteral("a"), QStringLiteral("algorithm")}, QStringLiteral("Hash algorithm (SHA256, SHA512, SHA1, MD5)."), QStringLiteral("name"), QStringLiteral("SHA256"));
+    QCommandLineOption fileOption(
+        QStringList{QStringLiteral("f"), QStringLiteral("file")},
+        QStringLiteral("ISO file to verify."),
+        QStringLiteral("path"));
+    QCommandLineOption expectedOption(
+        QStringList{QStringLiteral("e"), QStringLiteral("expected")},
+        QStringLiteral("Expected checksum value."),
+        QStringLiteral("hash"));
+    QCommandLineOption checksumFileOption(
+        QStringList{QStringLiteral("c"), QStringLiteral("checksum-file")},
+        QStringLiteral("Checksum file to import."),
+        QStringLiteral("path"));
+    QCommandLineOption algorithmOption(
+        QStringList{QStringLiteral("a"), QStringLiteral("algorithm")},
+        QStringLiteral("Hash algorithm (SHA256, SHA512, SHA1, MD5)."),
+        QStringLiteral("name"),
+        QStringLiteral("SHA256"));
 
     parser.addOption(fileOption);
     parser.addOption(expectedOption);
@@ -64,7 +80,7 @@ int main(int argc, char* argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("iso-integrity-check-cli"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(ISO_APP_VERSION));
 
     const CliOptions options = parseOptions(app);
     if (options.filePath.isEmpty()) {
@@ -84,11 +100,10 @@ int main(int argc, char* argv[])
             QTextStream(stderr) << error.what() << '\n';
             return 2;
         }
-    } else if (expectedChecksum.isEmpty()) {
-        if (const auto validationError = iso::validateExpectedChecksum({}, algorithm); validationError.has_value()) {
-            Q_UNUSED(validationError);
-        }
-    } else if (const auto inferred = iso::algorithmFromChecksumLength(iso::normalizeChecksum(expectedChecksum).size())) {
+    } else if (
+        const auto inferred = iso::algorithmFromChecksumLength(iso::normalizeChecksum(expectedChecksum).size())) {
+        // Auto-detect the algorithm from a pasted checksum's length when the user
+        // left the default (SHA256) selected.
         if (options.algorithm == QStringLiteral("SHA256") && algorithm != *inferred) {
             algorithm = *inferred;
         }

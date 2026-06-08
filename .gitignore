@@ -4,21 +4,19 @@ __pycache__/
 
 # Editor / language-server artifacts
 .cache/
-.clangd
 compile_commands.json
 compile_flags.txt
 
 # C++ / CMake build output
-build/
-build-linux/
+build*/
 out/
 standalone/
 CMakeFiles/
 CMakeCache.txt
-compile_commands.json
 cmake_install.cmake
 CTestTestfile.cmake
 Testing/
+CMakeUserPresets.json
 
 # Visual Studio / MSVC
 .vs/

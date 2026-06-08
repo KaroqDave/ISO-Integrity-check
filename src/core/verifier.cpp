@@ -10,14 +10,14 @@
 #include <thread>
 
 #ifdef _WIN32
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <windows.h>
-#  include <bcrypt.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <bcrypt.h>
 #endif
 
 namespace iso {
@@ -39,12 +39,13 @@ void throwIfCancelled(const CancelToken& cancelToken)
 void throwOnReadError(const QFile& file)
 {
     if (file.error() != QFileDevice::NoError) {
-        throw std::runtime_error(QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
+        throw std::runtime_error(
+            QStringLiteral("The selected file could not be read: %1").arg(file.errorString()).toStdString());
     }
 }
 
-template<typename HashChunkFn>
-void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
+template <typename HashChunkFn>
+void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const CancelToken& cancelToken)
 {
     QByteArray buffer = file.read(HashBufferSize);
     if (buffer.isEmpty()) {
@@ -55,12 +56,22 @@ void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const ProgressC
     QByteArray nextBuffer;
     std::thread reader;
 
+    // Always join an in-flight read-ahead thread, even when hashChunk throws:
+    // destroying a still-joinable std::thread would otherwise call std::terminate().
+    struct ReaderJoinGuard {
+        std::thread& reader;
+        ~ReaderJoinGuard()
+        {
+            if (reader.joinable()) {
+                reader.join();
+            }
+        }
+    } readerJoinGuard{reader};
+
     while (!buffer.isEmpty()) {
         throwIfCancelled(cancelToken);
 
-        reader = std::thread([&file, &nextBuffer]() {
-            nextBuffer = file.read(HashBufferSize);
-        });
+        reader = std::thread([&file, &nextBuffer]() { nextBuffer = file.read(HashBufferSize); });
 
         hashChunk(buffer);
         reader.join();
@@ -100,7 +111,7 @@ LPCWSTR cngAlgorithmId(const QString& algorithm)
 }
 
 class CngHasher {
-public:
+  public:
     explicit CngHasher(LPCWSTR algorithmId)
     {
         if (BCryptOpenAlgorithmProvider(&algorithm_, algorithmId, nullptr, 0) < 0) {
@@ -131,7 +142,8 @@ public:
         if (length <= 0) {
             return;
         }
-        if (BCryptHashData(hash_, reinterpret_cast<PUCHAR>(const_cast<char*>(data)), static_cast<ULONG>(length), 0) < 0) {
+        if (BCryptHashData(hash_, reinterpret_cast<PUCHAR>(const_cast<char*>(data)), static_cast<ULONG>(length), 0) <
+            0) {
             throw CngError("Failed while hashing file data.");
         }
     }
@@ -140,7 +152,9 @@ public:
     {
         DWORD hashLength = 0;
         DWORD written = 0;
-        if (BCryptGetProperty(hash_, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLength), sizeof(hashLength), &written, 0) < 0) {
+        if (BCryptGetProperty(
+                hash_, BCRYPT_HASH_LENGTH, reinterpret_cast<PUCHAR>(&hashLength), sizeof(hashLength), &written, 0) <
+            0) {
             throw CngError("Failed to query the hash length.");
         }
 
@@ -151,12 +165,13 @@ public:
         return result;
     }
 
-private:
+  private:
     BCRYPT_ALG_HANDLE algorithm_ = nullptr;
     BCRYPT_HASH_HANDLE hash_ = nullptr;
 };
 
-QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
+QString
+hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
 {
     CngHasher hasher(algorithmId);
     qint64 bytesRead = 0;
@@ -170,7 +185,6 @@ QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& pr
                 progressCallback(bytesRead);
             }
         },
-        progressCallback,
         cancelToken);
 
     return QString::fromLatin1(hasher.finish().toHex());
@@ -178,7 +192,11 @@ QString hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& pr
 
 #endif // _WIN32
 
-QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
+QString hashWithQt(
+    QFile& file,
+    QCryptographicHash::Algorithm algorithm,
+    const ProgressCallback& progressCallback,
+    const CancelToken& cancelToken)
 {
     QCryptographicHash digest(algorithm);
     qint64 bytesRead = 0;
@@ -192,7 +210,6 @@ QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const P
                 progressCallback(bytesRead);
             }
         },
-        progressCallback,
         cancelToken);
 
     return QString::fromLatin1(digest.result().toHex());
@@ -200,7 +217,8 @@ QString hashWithQt(QFile& file, QCryptographicHash::Algorithm algorithm, const P
 
 } // namespace
 
-QString calculateFileHash(const QString& filePath, const QString& algorithm, ProgressCallback progressCallback, CancelToken cancelToken)
+QString calculateFileHash(
+    const QString& filePath, const QString& algorithm, ProgressCallback progressCallback, CancelToken cancelToken)
 {
     const auto hashes = supportedHashes();
     if (!hashes.contains(algorithm)) {
@@ -209,7 +227,8 @@ QString calculateFileHash(const QString& filePath, const QString& algorithm, Pro
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        throw std::runtime_error(QStringLiteral("The selected file could not be opened: %1").arg(file.errorString()).toStdString());
+        throw std::runtime_error(
+            QStringLiteral("The selected file could not be opened: %1").arg(file.errorString()).toStdString());
     }
 
 #ifdef _WIN32
@@ -238,7 +257,11 @@ VerificationResult verifyChecksum(
     }
 
     if (!supportedHashes().contains(algorithm)) {
-        return {VerificationStatus::Error, QStringLiteral("Unsupported hash algorithm: %1").arg(algorithm), {}, std::nullopt};
+        return {
+            VerificationStatus::Error,
+            QStringLiteral("Unsupported hash algorithm: %1").arg(algorithm),
+            {},
+            std::nullopt};
     }
 
     if (!info.exists()) {
