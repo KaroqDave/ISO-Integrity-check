@@ -8,6 +8,17 @@ The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
+## Features
+
+- **Cancellable verification** that runs off the UI thread, with live progress, throughput, and an estimated time remaining for large ISO files.
+- **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight the first differing character.
+- **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
+- **Drag and drop** an ISO or checksum file straight onto the matching section.
+- **SHA256, SHA512, SHA1, and MD5**, with hardware-accelerated hashing via Windows CNG (BCrypt) and Qt's `QCryptographicHash` on Linux.
+- **Light, dark, and system themes**, and it remembers your window, theme, and last-used folders between runs.
+- **Headless CLI** (`iso-integrity-check-cli`) that shares the same core for scripting and automation.
+- **Cross-platform**: native Windows build and a portable Linux AppImage.
+
 ## Download (Ready To Run)
 
 Grab the latest build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases):
