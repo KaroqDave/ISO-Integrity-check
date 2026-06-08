@@ -38,7 +38,7 @@ jobs:
         run: ./scripts/build-standalone.ps1 -BuildDir build
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-release
           path: standalone/*.zip
@@ -77,7 +77,7 @@ jobs:
           ./scripts/build-appimage.sh
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-release
           path: standalone/*.AppImage
@@ -88,12 +88,12 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/windows-release/**

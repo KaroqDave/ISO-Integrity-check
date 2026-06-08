@@ -38,7 +38,7 @@ jobs:
         run: ./scripts/build-standalone.ps1 -BuildDir build
 
       - name: Upload Windows bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-integrity-check-windows
           path: standalone/*.zip
@@ -91,7 +91,7 @@ jobs:
           ./scripts/build-appimage.sh
 
       - name: Upload AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: iso-integrity-check-appimage
           path: standalone/*.AppImage
