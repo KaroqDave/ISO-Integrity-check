@@ -120,6 +120,7 @@ class MainWindow : public QMainWindow {
     quint64 jobTokenCounter = 0;
     qint64 verificationFileSize = 0;
     QString activeVerificationSummary;
+    QString activeExpectedChecksum;
 
     QElapsedTimer progressElapsedTimer;
     qint64 lastProgressBytes = 0;

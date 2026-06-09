@@ -11,7 +11,7 @@ The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
 ## Features
 
 - **Cancellable verification** that runs off the UI thread, with live progress, throughput, and an estimated time remaining for large ISO files.
-- **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters.
+- **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters in a side-by-side comparison panel below the result.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
 - **Drag and drop** an ISO or checksum file straight onto the matching section.
 - **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback.
@@ -127,6 +127,8 @@ build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --ch
 
 Exit codes: `0` = match or hash-only success, `1` = mismatch, `2` = error.
 
+On mismatch, the CLI prints `MISMATCH:` and the computed hash. Per-character diff highlighting and position summaries are GUI-only.
+
 ## Standalone Build (Export For Distribution)
 
 ### Windows
@@ -194,11 +196,15 @@ If a checksum file contains multiple entries, the app prefers the line matching 
 
 ## How To Use
 
-1. Click **Browse...** and select an `.iso` file.
-2. Choose the hash type provided by the official download source, or click **Import checksum file...**.
+1. Click **Browse...** and select an `.iso` file (or drag and drop an ISO onto the ISO file section).
+2. Choose the hash type provided by the official download source, or click **Import checksum file...** (or drag and drop a checksum file onto the verification input section).
 3. Paste the expected checksum if you are not importing it from a checksum file.
 4. Click **Calculate / Verify**.
 
-The app streams files in chunks, so large ISO files are not loaded fully into memory. If no expected checksum is pasted, it will still calculate and show the selected hash.
+While verification runs, the button changes to **Cancel** so you can stop a long hash on a large ISO. Leave the expected checksum empty to calculate the hash only — the app will show the computed value without comparing it.
+
+On a mismatch, the expected and computed fields are outlined in orange and a comparison panel appears below the result, highlighting every differing character and listing the 1-based positions of the differences.
+
+The app streams files in chunks, so large ISO files are not loaded fully into memory.
 
 Only trust checksums published by the official operating system or vendor download page.

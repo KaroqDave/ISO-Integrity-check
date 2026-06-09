@@ -641,6 +641,7 @@ void MainWindow::startVerification()
 
     const quint64 jobToken = nextJobToken();
     activeJobToken = jobToken;
+    activeExpectedChecksum = expectedChecksum;
 
     setRunning(true);
     setStatus(iso::VerificationStatus::Generated, activeVerificationSummary, QString());
@@ -686,10 +687,10 @@ void MainWindow::finishVerification(const iso::VerificationResult& result, quint
     setRunning(false);
 
     if (result.status == iso::VerificationStatus::Mismatch) {
-        applyMismatchHighlight(expectedEdit->text(), result.computedHash);
+        applyMismatchHighlight(activeExpectedChecksum, result.computedHash);
         QString detail = resultDetail(result);
         const QString mismatchSummary = iso::formatChecksumMismatchSummary(
-            iso::checksumMismatchPositions(expectedEdit->text(), result.computedHash));
+            iso::checksumMismatchPositions(activeExpectedChecksum, result.computedHash));
         if (!mismatchSummary.isEmpty()) {
             detail = QStringLiteral("%1 %2").arg(detail, mismatchSummary);
         }
@@ -850,6 +851,10 @@ void MainWindow::applyCurrentTheme()
     }
     refreshStatusBadge();
     updateExpectedValidation();
+    if (currentStatus == iso::VerificationStatus::Mismatch && !activeExpectedChecksum.isEmpty() &&
+        computedEdit && !computedEdit->text().isEmpty()) {
+        applyMismatchHighlight(activeExpectedChecksum, computedEdit->text());
+    }
 }
 
 void MainWindow::refreshStatusBadge()
@@ -926,7 +931,7 @@ void MainWindow::applyMismatchHighlight(const QString& expected, const QString& 
 
     const QString normalizedExpected = iso::normalizeChecksum(expected);
     const QString normalizedComputed = iso::normalizeChecksum(computed);
-    const QList<qsizetype> mismatchPositions = iso::checksumMismatchPositions(normalizedExpected, normalizedComputed);
+    const QList<qsizetype> mismatchPositions = iso::checksumMismatchPositions(expected, computed);
     const QString mismatchColor = palette.statusMismatch.name(QColor::HexRgb);
 
     auto highlightMismatches = [&](const QString& value) -> QString {

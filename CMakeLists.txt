@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.21)
 
 if(WIN32)
-    project(ISOIntegrityCheck VERSION 1.1.1 LANGUAGES CXX RC)
+    project(ISOIntegrityCheck VERSION 1.2.0 LANGUAGES CXX RC)
 else()
-    project(ISOIntegrityCheck VERSION 1.1.1 LANGUAGES CXX)
+    project(ISOIntegrityCheck VERSION 1.2.0 LANGUAGES CXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
