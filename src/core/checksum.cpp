@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
+#include <QtGlobal>
 
 #include <stdexcept>
 
@@ -102,6 +103,54 @@ QStringList supportedHashNames()
 QString normalizeChecksum(const QString& value)
 {
     return QString(value).trimmed().toLower();
+}
+
+QList<qsizetype> checksumMismatchPositions(const QString& expectedChecksum, const QString& computedChecksum)
+{
+    const QString normalizedExpected = normalizeChecksum(expectedChecksum);
+    const QString normalizedComputed = normalizeChecksum(computedChecksum);
+    const qsizetype maxLength = qMax(normalizedExpected.size(), normalizedComputed.size());
+    QList<qsizetype> positions;
+    positions.reserve(maxLength);
+
+    for (qsizetype i = 0; i < maxLength; ++i) {
+        const bool expectedHasChar = i < normalizedExpected.size();
+        const bool computedHasChar = i < normalizedComputed.size();
+        if (expectedHasChar != computedHasChar ||
+            (expectedHasChar && normalizedExpected.at(i) != normalizedComputed.at(i))) {
+            positions.append(i);
+        }
+    }
+
+    return positions;
+}
+
+QString formatChecksumMismatchSummary(const QList<qsizetype>& mismatchPositions, qsizetype maxListed)
+{
+    if (mismatchPositions.isEmpty()) {
+        return {};
+    }
+
+    const qsizetype listedCount = qMin(qMax(maxListed, qsizetype{1}), mismatchPositions.size());
+    QStringList displayedPositions;
+    displayedPositions.reserve(listedCount);
+    for (qsizetype i = 0; i < listedCount; ++i) {
+        displayedPositions.append(QString::number(mismatchPositions.at(i) + 1));
+    }
+
+    const QString differenceWord =
+        mismatchPositions.size() == 1 ? QStringLiteral("difference") : QStringLiteral("differences");
+    const QString characterWord = listedCount == 1 ? QStringLiteral("character") : QStringLiteral("characters");
+    QString summary = QStringLiteral("%1 %2 at %3 %4")
+                          .arg(mismatchPositions.size())
+                          .arg(differenceWord, characterWord, displayedPositions.join(QStringLiteral(", ")));
+
+    const qsizetype remaining = mismatchPositions.size() - listedCount;
+    if (remaining > 0) {
+        summary += QStringLiteral(" and %1 more").arg(remaining);
+    }
+
+    return summary + QStringLiteral(" (1-based).");
 }
 
 std::optional<QString> validateExpectedChecksum(const QString& expectedChecksum, const QString& algorithm)

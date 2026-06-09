@@ -11,6 +11,7 @@
 #   CMAKE_BUILD_TYPE   CMake build type (default: Release)
 #   BUILD_DIR          CMake build directory (default: build-linux)
 #   TOOLS_DIR          Where linuxdeploy tools are cached (default: $HOME/.cache/iso-integrity-check-tools)
+#   NO_STRIP           Disable linuxdeploy stripping (default: true; avoids .relr.dyn issues on rolling distros)
 
 set -euo pipefail
 
@@ -72,6 +73,63 @@ ensure_linuxdeploy() {
     echo "$linuxdeploy"
 }
 
+prepare_qt_plugin_scope() {
+    if [[ -z "${QMAKE:-}" ]]; then
+        return
+    fi
+
+    local plugin_source
+    plugin_source="$("$QMAKE" -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
+    if [[ -z "$plugin_source" || ! -d "$plugin_source" ]]; then
+        return
+    fi
+
+    local plugin_root="$BuildOutputDir/qt-plugins"
+    local qmake_wrapper="$BuildOutputDir/qmake-wrapper.sh"
+    mkdir -p "$plugin_root"
+
+    copy_qt_plugin() {
+        local relative_path="$1"
+        local source_path="$plugin_source/$relative_path"
+        local target_path="$plugin_root/$relative_path"
+        if [[ -f "$source_path" ]]; then
+            mkdir -p "$(dirname "$target_path")"
+            cp "$source_path" "$target_path"
+        fi
+    }
+
+    # Keep linuxdeploy-plugin-qt away from optional distro-wide plugins that can
+    # depend on libraries unrelated to this app, especially on rolling releases.
+    copy_qt_plugin "platforms/libqxcb.so"
+    copy_qt_plugin "platforms/libqminimal.so"
+    copy_qt_plugin "platforms/libqoffscreen.so"
+    copy_qt_plugin "imageformats/libqgif.so"
+    copy_qt_plugin "imageformats/libqico.so"
+    copy_qt_plugin "imageformats/libqjpeg.so"
+    copy_qt_plugin "imageformats/libqsvg.so"
+
+    cat > "$qmake_wrapper" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "-query" && "\${2:-}" == "QT_INSTALL_PLUGINS" ]]; then
+    printf '%s\n' "$plugin_root"
+    exit 0
+fi
+if [[ "\${1:-}" == "-query" && \$# -eq 1 ]]; then
+    "$QMAKE" -query | while IFS= read -r line; do
+        if [[ "\$line" == QT_INSTALL_PLUGINS:* ]]; then
+            printf 'QT_INSTALL_PLUGINS:%s\n' "$plugin_root"
+        else
+            printf '%s\n' "\$line"
+        fi
+    done
+    exit 0
+fi
+exec "$QMAKE" "\$@"
+EOF
+    chmod +x "$qmake_wrapper"
+    export QMAKE="$qmake_wrapper"
+}
+
 Version="$(get_project_version)"
 if [[ -z "$Version" ]]; then
     Version="1.0.0"
@@ -129,6 +187,9 @@ elif command -v qmake >/dev/null 2>&1; then
     export QMAKE="$(command -v qmake)"
 fi
 
+export NO_STRIP="${NO_STRIP:-true}"
+export EXTRA_PLATFORM_PLUGINS="${EXTRA_PLATFORM_PLUGINS:-libqminimal.so;libqoffscreen.so}"
+
 step "Creating AppImage"
 mkdir -p "$OutputRoot"
 OutputPath="$OutputRoot/$AppName-$Version-x86_64.AppImage"
@@ -137,6 +198,7 @@ rm -f "$OutputPath"
 # linuxdeploy writes the AppImage to the current working directory.
 rm -rf "$BuildOutputDir"
 mkdir -p "$BuildOutputDir"
+prepare_qt_plugin_scope
 pushd "$BuildOutputDir" > /dev/null
 
 "$LinuxDeploy" --appdir "$AppDir" \

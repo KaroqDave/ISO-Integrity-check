@@ -6,3 +6,5 @@ CompileFlags:
   Add:
     - -std=c++17
     - -Isrc
+  Remove:
+    - -mno-direct-extern-access

@@ -7,6 +7,9 @@
 #include <QFileInfo>
 
 #include <stdexcept>
+#include <condition_variable>
+#include <exception>
+#include <mutex>
 #include <thread>
 
 #ifdef _WIN32
@@ -18,6 +21,10 @@
 #endif
 #include <windows.h>
 #include <bcrypt.h>
+#endif
+
+#ifdef ISO_HAS_OPENSSL
+#include <openssl/evp.h>
 #endif
 
 namespace iso {
@@ -47,41 +54,84 @@ void throwOnReadError(const QFile& file)
 template <typename HashChunkFn>
 void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const CancelToken& cancelToken)
 {
-    QByteArray buffer = file.read(HashBufferSize);
-    if (buffer.isEmpty()) {
-        throwOnReadError(file);
-        return;
-    }
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::condition_variable consumed;
+    QByteArray pendingBuffer;
+    std::exception_ptr readError;
+    bool hasPendingBuffer = false;
+    bool readFinished = false;
+    bool stopReader = false;
 
-    QByteArray nextBuffer;
-    std::thread reader;
+    std::thread reader([&]() {
+        try {
+            while (true) {
+                QByteArray buffer = file.read(HashBufferSize);
+                if (buffer.isEmpty()) {
+                    throwOnReadError(file);
+                    {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        readFinished = true;
+                    }
+                    ready.notify_one();
+                    return;
+                }
 
-    // Always join an in-flight read-ahead thread, even when hashChunk throws:
-    // destroying a still-joinable std::thread would otherwise call std::terminate().
+                std::unique_lock<std::mutex> lock(mutex);
+                consumed.wait(lock, [&]() { return !hasPendingBuffer || stopReader; });
+                if (stopReader) {
+                    return;
+                }
+                pendingBuffer = std::move(buffer);
+                hasPendingBuffer = true;
+                lock.unlock();
+                ready.notify_one();
+            }
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(mutex);
+            readError = std::current_exception();
+            readFinished = true;
+            ready.notify_one();
+        }
+    });
+
     struct ReaderJoinGuard {
         std::thread& reader;
+        std::mutex& mutex;
+        std::condition_variable& consumed;
+        bool& stopReader;
         ~ReaderJoinGuard()
         {
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                stopReader = true;
+            }
+            consumed.notify_one();
             if (reader.joinable()) {
                 reader.join();
             }
         }
-    } readerJoinGuard{reader};
+    } readerJoinGuard{reader, mutex, consumed, stopReader};
 
-    while (!buffer.isEmpty()) {
-        throwIfCancelled(cancelToken);
+    while (true) {
+        QByteArray buffer;
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            ready.wait(lock, [&]() { return hasPendingBuffer || readFinished || readError; });
+            if (readError) {
+                std::rethrow_exception(readError);
+            }
+            if (!hasPendingBuffer && readFinished) {
+                break;
+            }
 
-        reader = std::thread([&file, &nextBuffer]() { nextBuffer = file.read(HashBufferSize); });
-
-        hashChunk(buffer);
-        reader.join();
-
-        if (nextBuffer.isEmpty()) {
-            throwOnReadError(file);
-            break;
+            buffer = std::move(pendingBuffer);
+            hasPendingBuffer = false;
         }
+        consumed.notify_one();
 
-        buffer = std::move(nextBuffer);
+        throwIfCancelled(cancelToken);
+        hashChunk(buffer);
     }
 
     throwIfCancelled(cancelToken);
@@ -192,6 +242,93 @@ hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCa
 
 #endif // _WIN32
 
+#ifdef ISO_HAS_OPENSSL
+
+struct EvpError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+const EVP_MD* evpAlgorithm(const QString& algorithm)
+{
+    if (algorithm == QStringLiteral("SHA256")) {
+        return EVP_sha256();
+    }
+    if (algorithm == QStringLiteral("SHA512")) {
+        return EVP_sha512();
+    }
+    if (algorithm == QStringLiteral("SHA1")) {
+        return EVP_sha1();
+    }
+    if (algorithm == QStringLiteral("MD5")) {
+        return EVP_md5();
+    }
+    return nullptr;
+}
+
+class EvpHasher {
+  public:
+    explicit EvpHasher(const EVP_MD* algorithm) : context_(EVP_MD_CTX_new())
+    {
+        if (!context_) {
+            throw EvpError("Failed to create the OpenSSL hash context.");
+        }
+        if (EVP_DigestInit_ex(context_, algorithm, nullptr) != 1) {
+            throw EvpError("Failed to initialize the OpenSSL hash.");
+        }
+    }
+
+    ~EvpHasher() { EVP_MD_CTX_free(context_); }
+
+    EvpHasher(const EvpHasher&) = delete;
+    EvpHasher& operator=(const EvpHasher&) = delete;
+
+    void update(const char* data, qsizetype length)
+    {
+        if (length <= 0) {
+            return;
+        }
+        if (EVP_DigestUpdate(context_, data, static_cast<size_t>(length)) != 1) {
+            throw EvpError("Failed while hashing file data with OpenSSL.");
+        }
+    }
+
+    QByteArray finish()
+    {
+        QByteArray result(EVP_MAX_MD_SIZE, '\0');
+        unsigned int hashLength = 0;
+        if (EVP_DigestFinal_ex(context_, reinterpret_cast<unsigned char*>(result.data()), &hashLength) != 1) {
+            throw EvpError("Failed to finalize the OpenSSL hash.");
+        }
+        result.resize(static_cast<qsizetype>(hashLength));
+        return result;
+    }
+
+  private:
+    EVP_MD_CTX* context_ = nullptr;
+};
+
+QString hashWithOpenSsl(
+    QFile& file, const EVP_MD* algorithm, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
+{
+    EvpHasher hasher(algorithm);
+    qint64 bytesRead = 0;
+
+    hashFileWithReadAhead(
+        file,
+        [&](const QByteArray& chunk) {
+            hasher.update(chunk.constData(), chunk.size());
+            bytesRead += chunk.size();
+            if (progressCallback) {
+                progressCallback(bytesRead);
+            }
+        },
+        cancelToken);
+
+    return QString::fromLatin1(hasher.finish().toHex());
+}
+
+#endif // ISO_HAS_OPENSSL
+
 QString hashWithQt(
     QFile& file,
     QCryptographicHash::Algorithm algorithm,
@@ -236,6 +373,16 @@ QString calculateFileHash(
         try {
             return hashWithCng(file, algorithmId, progressCallback, cancelToken);
         } catch (const CngError&) {
+            file.seek(0);
+        }
+    }
+#endif
+
+#ifdef ISO_HAS_OPENSSL
+    if (const EVP_MD* algorithmId = evpAlgorithm(algorithm)) {
+        try {
+            return hashWithOpenSsl(file, algorithmId, progressCallback, cancelToken);
+        } catch (const EvpError&) {
             file.seek(0);
         }
     }

@@ -12,11 +12,13 @@ using namespace iso;
 class ChecksumTests : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void calculatesAllSupportedAlgorithms();
     void expectedHashIsCaseInsensitiveAndTrimmed();
     void invalidChecksumLengthRejected();
     void invalidChecksumCharactersRejected();
+    void mismatchPositionsIncludeAllDifferences();
+    void mismatchSummaryListsDifferences();
     void sha1ValidationUses40HexCharacters();
     void plainSha256FileIsParsed();
     void gnuStyleLineWithFilenameIsParsed();
@@ -34,7 +36,7 @@ private slots:
 class VerifierTests : public QObject {
     Q_OBJECT
 
-private slots:
+  private slots:
     void mismatchIsReported();
     void missingChecksumGeneratesHash();
     void missingFileIsReported();
@@ -82,8 +84,8 @@ void ChecksumTests::expectedHashIsCaseInsensitiveAndTrimmed()
     QVERIFY(file.write(data) == data.size());
     file.close();
 
-    const QString expected = QString::fromLatin1(
-        QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()).toUpper();
+    const QString expected =
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()).toUpper();
 
     const auto result = verifyChecksum(filePath, QStringLiteral("  %1\n").arg(expected), QStringLiteral("SHA256"));
     QCOMPARE(result.status, VerificationStatus::Match);
@@ -103,6 +105,20 @@ void ChecksumTests::invalidChecksumCharactersRejected()
     const auto error = validateExpectedChecksum(QString(64, QLatin1Char('g')), QStringLiteral("SHA256"));
     QVERIFY(error.has_value());
     QVERIFY(error->contains(QStringLiteral("hexadecimal")));
+}
+
+void ChecksumTests::mismatchPositionsIncludeAllDifferences()
+{
+    const auto positions = checksumMismatchPositions(QStringLiteral("  aabbccdd\n"), QStringLiteral("aab0cceeff"));
+
+    QCOMPARE(positions, QList<qsizetype>({3, 6, 7, 8, 9}));
+}
+
+void ChecksumTests::mismatchSummaryListsDifferences()
+{
+    const auto summary = formatChecksumMismatchSummary(QList<qsizetype>({0, 2, 4}), 2);
+
+    QCOMPARE(summary, QStringLiteral("3 differences at characters 1, 3 and 1 more (1-based)."));
 }
 
 void ChecksumTests::sha1ValidationUses40HexCharacters()
@@ -175,8 +191,10 @@ void ChecksumTests::matchingIsoFilenameWinsOverFirstSupportedHash()
     QVERIFY(iso.write(data) == data.size());
     iso.close();
 
-    const QString matchingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
-    const QString text = QStringLiteral("%1  other.iso\n%2  sample.iso\n").arg(QString(64, QLatin1Char('0')), matchingHash);
+    const QString matchingHash =
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+    const QString text =
+        QStringLiteral("%1  other.iso\n%2  sample.iso\n").arg(QString(64, QLatin1Char('0')), matchingHash);
     const auto parsed = parseChecksumText(text, isoPath);
 
     QCOMPARE(parsed.checksum, matchingHash);
@@ -193,9 +211,10 @@ void ChecksumTests::exactIsoFilenameWinsOverPartialFilenameMatch()
     QVERIFY(iso.write(data) == data.size());
     iso.close();
 
-    const QString matchingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
-    const QString text = QStringLiteral("%1  sample.iso.zsync\n%2  sample.iso\n")
-        .arg(QString(64, QLatin1Char('0')), matchingHash);
+    const QString matchingHash =
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+    const QString text =
+        QStringLiteral("%1  sample.iso.zsync\n%2  sample.iso\n").arg(QString(64, QLatin1Char('0')), matchingHash);
     const auto parsed = parseChecksumText(text, isoPath);
 
     QCOMPARE(parsed.checksum, matchingHash);
@@ -298,9 +317,10 @@ void ChecksumTests::matchingBsdStyleFilenameWinsOverFirstSupportedHash()
     QVERIFY(iso.write(data) == data.size());
     iso.close();
 
-    const QString matchingHash = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex());
+    const QString matchingHash =
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex());
     const QString text = QStringLiteral("SHA256 (other.iso) = %1\nSHA512 (sample.iso) = %2\n")
-        .arg(QString(64, QLatin1Char('0')), matchingHash);
+                             .arg(QString(64, QLatin1Char('0')), matchingHash);
     const auto parsed = parseChecksumText(text, isoPath);
 
     QCOMPARE(parsed.algorithm, QStringLiteral("SHA512"));
@@ -361,7 +381,8 @@ void VerifierTests::parsedChecksumCanVerifyMatch()
     file.close();
 
     const auto parsed = parseChecksumText(
-        QStringLiteral("%1  sample.iso").arg(QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex())),
+        QStringLiteral("%1  sample.iso")
+            .arg(QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex())),
         filePath);
     const auto result = verifyChecksum(filePath, parsed.checksum, parsed.algorithm);
     QCOMPARE(result.status, VerificationStatus::Match);
@@ -379,7 +400,8 @@ void VerifierTests::parsedChecksumCanVerifyMismatch()
     QVERIFY(file.write(data) == data.size());
     file.close();
 
-    const auto parsed = parseChecksumText(QStringLiteral("%1  sample.iso").arg(QString(64, QLatin1Char('0'))), filePath);
+    const auto parsed =
+        parseChecksumText(QStringLiteral("%1  sample.iso").arg(QString(64, QLatin1Char('0'))), filePath);
     const auto result = verifyChecksum(filePath, parsed.checksum, parsed.algorithm);
     QCOMPARE(result.status, VerificationStatus::Mismatch);
     QVERIFY(result.matches.has_value());
@@ -401,7 +423,8 @@ void VerifierTests::cancellationStopsVerification()
     auto cancelToken = makeCancelToken();
     cancelToken->store(true);
 
-    const auto result = verifyChecksum(filePath, QString(64, QLatin1Char('0')), QStringLiteral("SHA256"), {}, cancelToken);
+    const auto result =
+        verifyChecksum(filePath, QString(64, QLatin1Char('0')), QStringLiteral("SHA256"), {}, cancelToken);
     QCOMPARE(result.status, VerificationStatus::Cancelled);
 }
 

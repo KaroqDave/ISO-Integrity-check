@@ -11,10 +11,10 @@ The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
 ## Features
 
 - **Cancellable verification** that runs off the UI thread, with live progress, throughput, and an estimated time remaining for large ISO files.
-- **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight the first differing character.
+- **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
 - **Drag and drop** an ISO or checksum file straight onto the matching section.
-- **SHA256, SHA512, SHA1, and MD5**, with hardware-accelerated hashing via Windows CNG (BCrypt) and Qt's `QCryptographicHash` on Linux.
+- **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback.
 - **Light, dark, and system themes**, and it remembers your window, theme, and last-used folders between runs.
 - **Headless CLI** (`iso-integrity-check-cli`) that shares the same core for scripting and automation.
 - **Cross-platform**: native Windows build and a portable Linux AppImage.
@@ -54,6 +54,7 @@ Prerequisites:
 
 - CMake 3.21 or newer.
 - Qt 6.8 or newer with the `Core` and `Widgets` components (plus `Test` to run the C++ tests).
+- OpenSSL/libcrypto development headers are recommended on Linux/Unix for faster native hashing. If OpenSSL is missing, the build falls back to Qt hashing.
 - A C++17 compiler: MSVC (Visual Studio 2022+) on Windows, or GCC/Clang on Linux.
 
 Make sure CMake can find Qt. The simplest way is to point `CMAKE_PREFIX_PATH` at your Qt kit, either as an environment variable (recommended) or on the command line:
@@ -97,9 +98,9 @@ Linux development packages by distro:
 
 | Distro | Packages |
 |--------|----------|
-| Ubuntu/Debian | `qt6-base-dev`, `cmake`, `g++`, `libgl1-mesa-dev`, `libxkbcommon-dev` |
-| Fedora | `qt6-qtbase-devel`, `cmake`, `gcc-c++`, `mesa-libGL-devel`, `libxkbcommon-devel` |
-| Arch | `qt6-base`, `cmake`, `gcc`, `mesa`, `libxkbcommon` |
+| Ubuntu/Debian | `qt6-base-dev`, `cmake`, `g++`, `libssl-dev`, `libgl1-mesa-dev`, `libxkbcommon-dev` |
+| Fedora | `qt6-qtbase-devel`, `cmake`, `gcc-c++`, `openssl-devel`, `mesa-libGL-devel`, `libxkbcommon-devel` |
+| Arch | `qt6-base`, `cmake`, `gcc`, `openssl`, `mesa`, `libxkbcommon` |
 
 ### Editor / IntelliSense setup (clangd)
 
@@ -155,9 +156,11 @@ CMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64 ./scripts/build-appimage.sh
 This creates `standalone/ISO-Integrity-Check-<version>-x86_64.AppImage`.
 The script uses `build-linux/` by default so it does not reuse or overwrite a Windows CMake cache in `build/`.
 
+AppImage packaging also needs `curl`, `libfuse2`, and either `librsvg2-bin` (`rsvg-convert`) or ImageMagick (`convert`). On a fresh clone, Git should preserve the executable bit for `scripts/build-appimage.sh`; if your filesystem strips it, run `chmod +x ./scripts/build-appimage.sh` once. The script disables linuxdeploy's strip step by default because older bundled `strip` binaries can fail on modern rolling-release distro libraries.
+
 ## Performance
 
-On Windows, hashing uses the CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it, and overlaps file reading with hashing for large ISO files. On Linux, hashing uses Qt's `QCryptographicHash`.
+On Windows, hashing uses the CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it. On Linux and other Unix-like systems, hashing uses OpenSSL/libcrypto when available and falls back to Qt's `QCryptographicHash` otherwise. File reading is overlapped with hashing for large ISO files.
 
 ## Supported Hashes
 

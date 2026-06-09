@@ -25,7 +25,7 @@ jobs:
           cache: true
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT_DIR }}"
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build
         run: cmake --build build --config Release --target iso-integrity-check iso-integrity-check-cli iso-core-tests
@@ -55,7 +55,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            curl \
             libgl1-mesa-dev \
+            libssl-dev \
             libxkbcommon-dev \
             libfuse2 \
             librsvg2-bin \
@@ -71,24 +73,18 @@ jobs:
           cache: true
 
       - name: Configure
-        env:
-          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
-        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
       - name: Build
-        env:
-          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
         run: cmake --build build-linux --target iso-integrity-check iso-integrity-check-cli iso-core-tests
 
       - name: Test
         run: ctest --test-dir build-linux --output-on-failure
 
       - name: Build AppImage
-        env:
-          CMAKE_PREFIX_PATH: ${{ env.QT_ROOT_DIR }}
         run: |
           chmod +x ./scripts/build-appimage.sh
-          ./scripts/build-appimage.sh
+          CMAKE_PREFIX_PATH="$QT_ROOT_DIR" ./scripts/build-appimage.sh
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v7

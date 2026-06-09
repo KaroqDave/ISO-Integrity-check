@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QHash>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
@@ -29,6 +30,8 @@ struct ParsedChecksum {
 const QHash<QString, HashDetails>& supportedHashes();
 QStringList supportedHashNames();
 QString normalizeChecksum(const QString& value);
+QList<qsizetype> checksumMismatchPositions(const QString& expectedChecksum, const QString& computedChecksum);
+QString formatChecksumMismatchSummary(const QList<qsizetype>& mismatchPositions, qsizetype maxListed = 8);
 std::optional<QString> validateExpectedChecksum(const QString& expectedChecksum, const QString& algorithm);
 std::optional<QString> algorithmFromChecksumLength(qsizetype length);
 std::optional<ParsedChecksum> parseChecksumLine(const QString& line, int lineNumber);

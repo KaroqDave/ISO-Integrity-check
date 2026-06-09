@@ -486,8 +486,9 @@ QWidget* MainWindow::buildComputedSection()
 
 QWidget* MainWindow::buildFooterWarning()
 {
-    auto* warning = new QLabel(QStringLiteral("Only trust checksums from the official operating system or vendor "
-                                              "download page. SHA1 and MD5 are legacy options."));
+    auto* warning = new QLabel(QStringLiteral(
+        "Only trust checksums from the official operating system or vendor "
+        "download page. SHA1 and MD5 are legacy options."));
     warning->setObjectName(QStringLiteral("footnote"));
     warning->setWordWrap(true);
     return warning;
@@ -687,21 +688,10 @@ void MainWindow::finishVerification(const iso::VerificationResult& result, quint
     if (result.status == iso::VerificationStatus::Mismatch) {
         applyMismatchHighlight(expectedEdit->text(), result.computedHash);
         QString detail = resultDetail(result);
-        const QString normalizedExpected = iso::normalizeChecksum(expectedEdit->text());
-        const QString normalizedComputed = iso::normalizeChecksum(result.computedHash);
-        const qsizetype length = qMin(normalizedExpected.size(), normalizedComputed.size());
-        qsizetype firstDiff = -1;
-        for (qsizetype i = 0; i < length; ++i) {
-            if (normalizedExpected.at(i) != normalizedComputed.at(i)) {
-                firstDiff = i;
-                break;
-            }
-        }
-        if (firstDiff < 0 && normalizedExpected.size() != normalizedComputed.size()) {
-            firstDiff = length;
-        }
-        if (firstDiff >= 0) {
-            detail = QStringLiteral("%1 First difference at character %2 (1-based).").arg(detail).arg(firstDiff + 1);
+        const QString mismatchSummary = iso::formatChecksumMismatchSummary(
+            iso::checksumMismatchPositions(expectedEdit->text(), result.computedHash));
+        if (!mismatchSummary.isEmpty()) {
+            detail = QStringLiteral("%1 %2").arg(detail, mismatchSummary);
         }
         setStatus(result.status, result.message, detail);
     } else {
@@ -823,8 +813,9 @@ void MainWindow::showAbout()
     aboutBox.setWindowTitle(QStringLiteral("About ISO Integrity Check"));
     aboutBox.setText(QStringLiteral("ISO Integrity Check %1").arg(QString::fromLatin1(ISO_APP_VERSION)));
     aboutBox.setInformativeText(
-        QStringLiteral("Created by %1\n\nVerify ISO downloads with SHA512, SHA256, SHA1, and MD5 checksums.\n\nSHA1 "
-                       "and MD5 are legacy options. Prefer SHA256 or SHA512 from an official source.")
+        QStringLiteral(
+            "Created by %1\n\nVerify ISO downloads with SHA512, SHA256, SHA1, and MD5 checksums.\n\nSHA1 "
+            "and MD5 are legacy options. Prefer SHA256 or SHA512 from an official source.")
             .arg(QString::fromLatin1(AppAuthor)));
     aboutBox.setStandardButtons(QMessageBox::Ok);
     QPushButton* githubButton = aboutBox.addButton(QStringLiteral("Open GitHub"), QMessageBox::ActionRole);
@@ -869,8 +860,9 @@ void MainWindow::refreshStatusBadge()
     const QColor bg = iso::statusBadgeBackground(currentStatus, palette);
     const QColor fg = iso::statusBadgeText(currentStatus, palette);
 
-    statusLabel->setStyleSheet(QStringLiteral("QLabel#statusBadge { background: rgba(%1, %2, %3, %4); color: %5; "
-                                              "border-radius: 8px; padding: 8px 12px; font-weight: 700; }")
+    statusLabel->setStyleSheet(QStringLiteral(
+                                   "QLabel#statusBadge { background: rgba(%1, %2, %3, %4); color: %5; "
+                                   "border-radius: 8px; padding: 8px 12px; font-weight: 700; }")
                                    .arg(bg.red())
                                    .arg(bg.green())
                                    .arg(bg.blue())
@@ -934,38 +926,37 @@ void MainWindow::applyMismatchHighlight(const QString& expected, const QString& 
 
     const QString normalizedExpected = iso::normalizeChecksum(expected);
     const QString normalizedComputed = iso::normalizeChecksum(computed);
+    const QList<qsizetype> mismatchPositions = iso::checksumMismatchPositions(normalizedExpected, normalizedComputed);
     const QString mismatchColor = palette.statusMismatch.name(QColor::HexRgb);
 
-    auto highlightAt = [&](const QString& value, qsizetype index) -> QString {
-        if (index < 0 || index >= value.size()) {
-            return value.toHtmlEscaped();
+    auto highlightMismatches = [&](const QString& value) -> QString {
+        QString html;
+        qsizetype mismatchIndex = 0;
+        for (qsizetype i = 0; i < value.size(); ++i) {
+            while (mismatchIndex < mismatchPositions.size() && mismatchPositions.at(mismatchIndex) < i) {
+                ++mismatchIndex;
+            }
+
+            const QString character = QString(value.at(i)).toHtmlEscaped();
+            if (mismatchIndex < mismatchPositions.size() && mismatchPositions.at(mismatchIndex) == i) {
+                html +=
+                    QStringLiteral("<span style=\"color:%1;font-weight:700;\">%2</span>").arg(mismatchColor, character);
+            } else {
+                html += character;
+            }
         }
-        return value.left(index).toHtmlEscaped() +
-               QStringLiteral("<span style=\"color:%1;font-weight:700;\">%2</span>")
-                   .arg(mismatchColor, QString(value.at(index)).toHtmlEscaped()) +
-               value.mid(index + 1).toHtmlEscaped();
+        return html;
     };
 
-    qsizetype firstDiff = -1;
-    const qsizetype compareLength = qMin(normalizedExpected.size(), normalizedComputed.size());
-    for (qsizetype i = 0; i < compareLength; ++i) {
-        if (normalizedExpected.at(i) != normalizedComputed.at(i)) {
-            firstDiff = i;
-            break;
-        }
-    }
-    if (firstDiff < 0 && normalizedExpected.size() != normalizedComputed.size()) {
-        firstDiff = compareLength;
-    }
-
     const QString expectedHtml =
-        firstDiff >= 0 ? highlightAt(normalizedExpected, firstDiff) : normalizedExpected.toHtmlEscaped();
+        mismatchPositions.isEmpty() ? normalizedExpected.toHtmlEscaped() : highlightMismatches(normalizedExpected);
     const QString computedHtml =
-        firstDiff >= 0 ? highlightAt(normalizedComputed, firstDiff) : normalizedComputed.toHtmlEscaped();
-    mismatchDetailView->setHtml(QStringLiteral("<div style=\"word-wrap:break-word; word-break:break-all;\">"
-                                               "<p style=\"margin:0;\"><b>Expected:</b> %1</p>"
-                                               "<p style=\"margin:6px 0 0 0;\"><b>Computed:</b> %2</p>"
-                                               "</div>")
+        mismatchPositions.isEmpty() ? normalizedComputed.toHtmlEscaped() : highlightMismatches(normalizedComputed);
+    mismatchDetailView->setHtml(QStringLiteral(
+                                    "<div style=\"word-wrap:break-word; word-break:break-all;\">"
+                                    "<p style=\"margin:0;\"><b>Expected:</b> %1</p>"
+                                    "<p style=\"margin:6px 0 0 0;\"><b>Computed:</b> %2</p>"
+                                    "</div>")
                                     .arg(expectedHtml, computedHtml));
 
     const qreal docHeight = mismatchDetailView->document()->size().height();
