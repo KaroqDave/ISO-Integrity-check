@@ -1,28 +1,43 @@
 # ISO Integrity Check
 
 [![Build](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml/badge.svg)](https://github.com/KaroqDave/ISO-Integrity-check/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/KaroqDave/ISO-Integrity-check?label=release)](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-blue)](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A cross-platform desktop app for checking ISO file integrity with trusted checksums.
 
-The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
+Pick your ISO, paste the checksum from the vendor's download page, and the app tells you whether the download arrived intact — with a per-character diff when it did not. Pick **Auto** and you do not even need to know which algorithm the vendor used.
+
+Built with C++ and Qt 6, with a matching headless CLI for scripting.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
+## What's New in 1.3.0
+
+- **Auto hash type.** One selection reads the ISO once, computes SHA256, SHA512, SHA1, and MD5 together, and verifies against whichever one matches the length of the checksum you pasted. Switching the hash type afterwards is instant rather than a second pass over a multi-gigabyte file.
+- **Single-pass multi-algorithm hashing** throughout the core, so several digests cost one read instead of one read each. In the CLI: `--all`, or a comma-separated `--algorithm SHA256,SHA512`.
+- **Truncated reads are now detected.** A drive that returns zero bytes without reporting an error — removable media pulled mid-read, a dropped network share — no longer yields the digest of a partial file presented as a valid result.
+- **Sturdier error handling.** I/O failures are reported instead of thrown; the CLI previously terminated on an uncaught exception for cases such as a permission-denied file.
+- **Interface fixes.** Changing the hash type, or selecting a different ISO, no longer leaves the previous digest on screen under the new label. Light-theme secondary text now meets WCAG AA contrast.
+
+See the [full release notes](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest) for everything else.
+
 ## Features
 
+- **Auto hash type** that computes every algorithm from a single read and picks the right one to verify against. Choose a specific type instead when you know which you need and want to spend less CPU.
 - **Cancellable verification** that runs off the UI thread, with live progress, throughput, and an estimated time remaining for large ISO files.
 - **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters in a side-by-side comparison panel below the result.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
 - **Drag and drop** an ISO or checksum file straight onto the matching section.
 - **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback.
-- **Auto hash type**: pick *Auto* to read the ISO once and compute SHA256, SHA512, SHA1, and MD5 together, verifying against whichever one matches the expected checksum's length. Switching the hash type afterwards is instant instead of re-reading a multi-gigabyte file. The CLI equivalent is `--all`.
 - **Light, dark, and system themes**, and it remembers your window, theme, and last-used folders between runs.
 - **Headless CLI** (`iso-integrity-check-cli`) that shares the same core for scripting and automation.
 - **Cross-platform**: native Windows build and a portable Linux AppImage.
 
 ## Download (Ready To Run)
 
-Grab the latest build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases):
+Grab the latest build from the [Releases page](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest):
 
 ### Windows
 
@@ -208,18 +223,23 @@ If a checksum file contains multiple entries, the app prefers the line matching 
 
 ## How To Use
 
-1. Click **Browse...** and select an `.iso` file (or drag and drop an ISO onto the ISO file section).
-2. Choose the hash type provided by the official download source, or click **Import checksum file...** (or drag and drop a checksum file onto the verification input section).
-3. Paste the expected checksum if you are not importing it from a checksum file.
-4. Click **Calculate / Verify**.
+1. Click **Browse...** and select an `.iso` file, or drag and drop an ISO onto the ISO file section.
+2. Paste the expected checksum from the vendor's download page, or click **Import checksum file...** (dragging a checksum file onto the verification input section works too).
+3. Click **Calculate / Verify**.
 
-While verification runs, the button changes to **Cancel** so you can stop a long hash on a large ISO. Leave the expected checksum empty to calculate the hash only — the app will show the computed value without comparing it.
+The hash type starts on SHA256. Switch it to **Auto** and step 2 no longer requires knowing whether the vendor published SHA256 or SHA512 — Auto detects it from the checksum you pasted.
 
-Choosing **Auto** as the hash type computes SHA256, SHA512, SHA1, and MD5 from a single read of the ISO, and verifies against whichever one matches the length of the expected checksum — so you do not need to know which algorithm the vendor published. Afterwards, changing the hash type reuses the already-computed value instead of re-reading the ISO.
+While verification runs, the button changes to **Cancel** so you can stop a long hash on a large ISO. Leave the expected checksum empty to calculate the hash only — the app shows the computed value without comparing it.
 
-Auto costs more CPU than a single hash type, which is why it is not the default. On a fast NVMe drive hashing is CPU-bound, so computing all four is slower than computing one. Pick a specific type when you know which one you need.
+### Choosing a hash type
 
-With a specific hash type selected, changing it clears the computed field rather than relabelling the old digest, since a hash from one algorithm must never be shown under another's name.
+**Auto** reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together, verifying against whichever matches the length of the expected checksum. Changing the hash type afterwards reuses an already-computed value instead of re-reading the file.
+
+That costs more CPU than a single hash type. On a fast NVMe drive hashing is CPU-bound, so computing all four takes longer than computing one — pick a specific type when you know which you need and the ISO is large.
+
+With a specific type selected, changing it clears the computed field rather than relabelling the old digest, since a hash from one algorithm must never be displayed under another's name.
+
+### When the checksums differ
 
 On a mismatch, the expected and computed fields are outlined in orange and a comparison panel appears below the result, highlighting every differing character and listing the 1-based positions of the differences.
 
