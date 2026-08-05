@@ -7,25 +7,31 @@
 
 A cross-platform desktop app for checking ISO file integrity with trusted checksums.
 
-Pick your ISO, paste the checksum from the vendor's download page, and the app tells you whether the download arrived intact — with a per-character diff when it did not. Pick **Auto** and you do not even need to know which algorithm the vendor used.
+Pick your ISO, paste the checksum from the vendor's download page, and the app tells you whether the download arrived intact — with a per-character diff when it did not. The hash type defaults to **Auto**, so you do not even need to know which algorithm the vendor used.
 
 Built with C++ and Qt 6, with a matching headless CLI for scripting.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
-## What's New in 1.3.0
+## What's New in 1.3.1
 
-- **Auto hash type.** One selection reads the ISO once, computes SHA256, SHA512, SHA1, and MD5 together, and verifies against whichever one matches the length of the checksum you pasted. Switching the hash type afterwards is instant rather than a second pass over a multi-gigabyte file.
+- **Auto is now the default hash type.** Nothing to choose before verifying: paste the vendor's checksum and the app works out which algorithm it belongs to.
+- **Auto now computes one digest, not four.** Every hash type has a distinct checksum length, so a pasted checksum identifies its algorithm outright — 1.3.0 hashed all four anyway. Verifying under Auto is now as fast as picking the type by hand, which for a large ISO is roughly four times quicker than 1.3.0.
+- **With no checksum pasted, Auto computes SHA256 and SHA512** in a single read, so a checksum pasted after the run usually verifies straight from the cache.
+- **Behaviour change from 1.3.0:** switching the hash type after a run is no longer always instant. Auto now computes only what it needs, so a type it skipped requires a fresh run. Types computed earlier stay cached for as long as the file is unchanged.
+
+See the [full release notes](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest) for everything else.
+
+### Previously, in 1.3.0
+
 - **Single-pass multi-algorithm hashing** throughout the core, so several digests cost one read instead of one read each. In the CLI: `--all`, or a comma-separated `--algorithm SHA256,SHA512`.
 - **Truncated reads are now detected.** A drive that returns zero bytes without reporting an error — removable media pulled mid-read, a dropped network share — no longer yields the digest of a partial file presented as a valid result.
 - **Sturdier error handling.** I/O failures are reported instead of thrown; the CLI previously terminated on an uncaught exception for cases such as a permission-denied file.
 - **Interface fixes.** Changing the hash type, or selecting a different ISO, no longer leaves the previous digest on screen under the new label. Light-theme secondary text now meets WCAG AA contrast.
 
-See the [full release notes](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest) for everything else.
-
 ## Features
 
-- **Auto hash type** that computes every algorithm from a single read and picks the right one to verify against. Choose a specific type instead when you know which you need and want to spend less CPU.
+- **Auto hash type**, selected by default, that identifies the algorithm from the length of the checksum you pasted and computes just that one — as fast as picking the type by hand, without needing to know which the vendor used. With no checksum pasted it computes SHA256 and SHA512 in one read, so one pasted afterwards usually verifies without a second pass.
 - **Cancellable verification** that runs off the UI thread, with live progress, throughput, and an estimated time remaining for large ISO files.
 - **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters in a side-by-side comparison panel below the result.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
@@ -227,15 +233,17 @@ If a checksum file contains multiple entries, the app prefers the line matching 
 2. Paste the expected checksum from the vendor's download page, or click **Import checksum file...** (dragging a checksum file onto the verification input section works too).
 3. Click **Calculate / Verify**.
 
-The hash type starts on SHA256. Switch it to **Auto** and step 2 no longer requires knowing whether the vendor published SHA256 or SHA512 — Auto detects it from the checksum you pasted.
+The hash type starts on **Auto**, so step 2 does not require knowing whether the vendor published SHA256 or SHA512 — Auto detects it from the checksum you pasted, at no cost over picking the type yourself.
 
 While verification runs, the button changes to **Cancel** so you can stop a long hash on a large ISO. Leave the expected checksum empty to calculate the hash only — the app shows the computed value without comparing it.
 
 ### Choosing a hash type
 
-**Auto** reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together, verifying against whichever matches the length of the expected checksum. Changing the hash type afterwards reuses an already-computed value instead of re-reading the file.
+**Auto** identifies the hash type from the length of the expected checksum — every type has a distinct one — and computes only that type. Verifying under Auto therefore costs exactly what selecting the type by hand costs: one digest, one read. You save the step of knowing whether the vendor published SHA256 or SHA512, not any speed.
 
-That costs more CPU than a single hash type. On a fast NVMe drive hashing is CPU-bound, so computing all four takes longer than computing one — pick a specific type when you know which you need and the ISO is large.
+With no checksum pasted there is nothing to identify, so Auto computes SHA256 and SHA512 in a single read. That second digest is a hedge: a checksum pasted after the run usually verifies straight from the cache rather than re-reading a multi-gigabyte file.
+
+Switching to a hash type the run did not compute needs a fresh run. Digests accumulate across runs for as long as the file is unchanged, so a type computed earlier stays instant to switch back to.
 
 With a specific type selected, changing it clears the computed field rather than relabelling the old digest, since a hash from one algorithm must never be displayed under another's name.
 
