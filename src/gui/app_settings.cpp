@@ -25,6 +25,7 @@ AppSettings loadAppSettings()
     }
     result.lastIsoDir = settings.value(QStringLiteral("lastIsoDir")).toString();
     result.lastChecksumDir = settings.value(QStringLiteral("lastChecksumDir")).toString();
+    result.unbufferedReads = settings.value(QStringLiteral("unbufferedReads"), false).toBool();
     return result;
 }
 
@@ -35,6 +36,7 @@ void saveAppSettings(const AppSettings& settings)
     store.setValue(QStringLiteral("geometry"), settings.geometry);
     store.setValue(QStringLiteral("lastIsoDir"), settings.lastIsoDir);
     store.setValue(QStringLiteral("lastChecksumDir"), settings.lastChecksumDir);
+    store.setValue(QStringLiteral("unbufferedReads"), settings.unbufferedReads);
 }
 
 QString browseStartDirectory(const QString& savedDir)

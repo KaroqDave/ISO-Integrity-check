@@ -14,6 +14,9 @@ struct AppSettings {
     QByteArray geometry;
     QString lastIsoDir;
     QString lastChecksumDir;
+    // Off by default: reading through the system cache is quicker for the usual
+    // case of checking an ISO that was just downloaded and is still resident.
+    bool unbufferedReads = false;
 };
 
 AppSettings loadAppSettings();

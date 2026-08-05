@@ -18,6 +18,7 @@ struct CliOptions {
     QStringList algorithms;
     bool algorithmExplicit = false;
     bool hashOnly = false;
+    iso::IoPolicy ioPolicy = iso::IoPolicy::Buffered;
 };
 
 // Accepts "SHA256" or "SHA256,SHA512". Order is preserved and duplicates dropped
@@ -77,12 +78,18 @@ CliOptions parseOptions(QCoreApplication& app)
     QCommandLineOption allOption(
         QStringList{QStringLiteral("A"), QStringLiteral("all")},
         QStringLiteral("Compute every supported algorithm in a single read pass."));
+    QCommandLineOption unbufferedOption(
+        QStringLiteral("unbuffered"),
+        QStringLiteral("Read past the operating system's file cache instead of through it. Leaves the cache "
+                       "intact for the rest of the system, at the cost of speed when the file is already "
+                       "cached."));
 
     parser.addOption(fileOption);
     parser.addOption(expectedOption);
     parser.addOption(checksumFileOption);
     parser.addOption(algorithmOption);
     parser.addOption(allOption);
+    parser.addOption(unbufferedOption);
     parser.process(app);
 
     CliOptions options;
@@ -93,6 +100,7 @@ CliOptions parseOptions(QCoreApplication& app)
         parser.isSet(allOption) ? iso::supportedHashNames() : parseAlgorithmList(parser.value(algorithmOption));
     options.algorithmExplicit = parser.isSet(allOption) || parser.isSet(algorithmOption);
     options.hashOnly = !parser.isSet(expectedOption) && !parser.isSet(checksumFileOption);
+    options.ioPolicy = parser.isSet(unbufferedOption) ? iso::IoPolicy::Unbuffered : iso::IoPolicy::Buffered;
     return options;
 }
 
@@ -157,7 +165,8 @@ int main(int argc, char* argv[])
 
     const QStringList alsoCompute = algorithms.mid(algorithms.indexOf(algorithm) + 1) +
                                     algorithms.mid(0, algorithms.indexOf(algorithm));
-    const auto result = iso::verifyChecksum(options.filePath, expectedChecksum, algorithm, {}, {}, alsoCompute);
+    const auto result =
+        iso::verifyChecksum(options.filePath, expectedChecksum, algorithm, {}, {}, alsoCompute, options.ioPolicy);
 
     QTextStream out(stdout);
     if (algorithms.size() == 1) {

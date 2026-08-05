@@ -46,6 +46,9 @@ class VerifierTests : public QObject {
     void parsedChecksumCanVerifyMatch();
     void parsedChecksumCanVerifyMismatch();
     void cancellationStopsVerification();
+    void cancellationMidRunStopsParallelDigests();
+    void unbufferedReadsMatchBufferedDigest();
+    void unbufferedReadsHandleSmallAndEmptyFiles();
     void multiChunkFileHashMatchesReference();
     void emptyFileHashesToTheEmptyDigest();
     void directoryPathIsReportedAsError();
@@ -483,16 +486,47 @@ void VerifierTests::cancellationStopsVerification()
     QCOMPARE(result.status, VerificationStatus::Cancelled);
 }
 
+void VerifierTests::cancellationMidRunStopsParallelDigests()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString filePath = tempDir.path() + QStringLiteral("/large.bin");
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    // Several read-ahead buffers' worth, so the cancel below lands while the
+    // per-algorithm worker threads are mid-file rather than before they start.
+    QByteArray chunk(1024 * 1024, 'x');
+    for (int i = 0; i < 48; ++i) {
+        QVERIFY(file.write(chunk) == chunk.size());
+    }
+    file.close();
+
+    auto cancelToken = makeCancelToken();
+    // Requesting four algorithms puts three worker threads behind the caller;
+    // cancelling from the progress callback tears them all down mid-chunk.
+    const auto result = verifyChecksum(
+        filePath,
+        QString(64, QLatin1Char('0')),
+        QStringLiteral("SHA256"),
+        [&cancelToken](qint64) { cancelToken->store(true); },
+        cancelToken,
+        QStringList{QStringLiteral("SHA512"), QStringLiteral("SHA1"), QStringLiteral("MD5")});
+
+    QCOMPARE(result.status, VerificationStatus::Cancelled);
+    QVERIFY(result.computedHashes.isEmpty());
+}
+
 void VerifierTests::multiChunkFileHashMatchesReference()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
 
-    // Larger than two internal read-ahead buffers (8 MB each) and deliberately
-    // not a whole multiple of one, so the digest also covers a partial tail
-    // chunk. Byte values vary so a dropped or reordered chunk changes the hash.
+    // Larger than the whole ring of read-ahead buffers (4 x 8 MB), so slots are
+    // recycled at least once, and deliberately not a whole multiple of one, so
+    // the digest also covers a partial tail chunk. Byte values vary so a dropped
+    // or reordered chunk changes the hash.
     QByteArray data;
-    const qsizetype totalSize = (17 * 1024 * 1024) + 12345;
+    const qsizetype totalSize = (35 * 1024 * 1024) + 12345;
     data.reserve(totalSize);
     for (qsizetype i = 0; i < totalSize; ++i) {
         data.append(static_cast<char>((i * 31 + (i >> 13)) & 0xFF));
@@ -510,6 +544,74 @@ void VerifierTests::multiChunkFileHashMatchesReference()
     QCOMPARE(
         calculateFileHash(filePath, QStringLiteral("SHA512")),
         QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex()));
+}
+
+void VerifierTests::unbufferedReadsMatchBufferedDigest()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    // The unbuffered path reads in whole sectors, so the interesting case is a
+    // file whose size is not a sector multiple: its final read runs past the end
+    // of the file and must still hash only the real bytes. The size also crosses
+    // the buffer ring so requests are re-issued into recycled slots.
+    QByteArray data;
+    const qsizetype totalSize = (35 * 1024 * 1024) + 517;
+    data.reserve(totalSize);
+    for (qsizetype i = 0; i < totalSize; ++i) {
+        data.append(static_cast<char>((i * 17 + (i >> 11)) & 0xFF));
+    }
+
+    const QString filePath = tempDir.path() + QStringLiteral("/unbuffered.iso");
+    QFile file(filePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.write(data) == data.size());
+    file.close();
+
+    if (!bench::unbufferedIoAvailable(filePath)) {
+        QSKIP("Unbuffered reads are not available on this platform or filesystem.");
+    }
+
+    const QStringList algorithms{QStringLiteral("SHA256"), QStringLiteral("SHA512")};
+    const auto unbuffered = bench::hashWithBackend(filePath, algorithms, true, true);
+
+    QCOMPARE(
+        unbuffered.value(QStringLiteral("SHA256")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()));
+    QCOMPARE(
+        unbuffered.value(QStringLiteral("SHA512")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex()));
+}
+
+void VerifierTests::unbufferedReadsHandleSmallAndEmptyFiles()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    // Fewer bytes than a single buffer, so most of the ring is never issued at
+    // all, and then no bytes whatsoever.
+    const QByteArray tiny = QByteArrayLiteral("iso-integrity-check");
+    const QString tinyPath = tempDir.path() + QStringLiteral("/tiny.iso");
+    QFile tinyFile(tinyPath);
+    QVERIFY(tinyFile.open(QIODevice::WriteOnly));
+    QVERIFY(tinyFile.write(tiny) == tiny.size());
+    tinyFile.close();
+
+    const QString emptyPath = tempDir.path() + QStringLiteral("/empty.iso");
+    QFile emptyFile(emptyPath);
+    QVERIFY(emptyFile.open(QIODevice::WriteOnly));
+    emptyFile.close();
+
+    if (!bench::unbufferedIoAvailable(tinyPath)) {
+        QSKIP("Unbuffered reads are not available on this platform or filesystem.");
+    }
+
+    QCOMPARE(
+        bench::hashWithBackend(tinyPath, {QStringLiteral("SHA256")}, true, true).value(QStringLiteral("SHA256")),
+        QString::fromLatin1(QCryptographicHash::hash(tiny, QCryptographicHash::Sha256).toHex()));
+    QCOMPARE(
+        bench::hashWithBackend(emptyPath, {QStringLiteral("SHA256")}, true, true).value(QStringLiteral("SHA256")),
+        QString::fromLatin1(QCryptographicHash::hash(QByteArray{}, QCryptographicHash::Sha256).toHex()));
 }
 
 void VerifierTests::emptyFileHashesToTheEmptyDigest()

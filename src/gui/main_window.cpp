@@ -3,6 +3,7 @@
 #include "core/checksum.h"
 #include "gui/theme.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -27,6 +28,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QPoint>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
@@ -367,12 +369,18 @@ QLayout* MainWindow::buildHeaderLayout()
     headerButtons->setSpacing(6);
     themeButton = styledButton(themeButtonText(currentTheme), "text");
     connect(themeButton, &QPushButton::clicked, this, &MainWindow::toggleTheme);
+    // Kept in a menu rather than on a card: it changes how the file is read, not
+    // what is verified, and the cards are for the task itself.
+    optionsButton = styledButton(QStringLiteral("Options"), "text");
+    optionsButton->setAccessibleName(QStringLiteral("Options"));
+    connect(optionsButton, &QPushButton::clicked, this, &MainWindow::showOptionsMenu);
     auto* aboutButton = styledButton(QStringLiteral("About"), "text");
     connect(aboutButton, &QPushButton::clicked, this, &MainWindow::showAbout);
     clearButton = styledButton(QStringLiteral("Clear"), "text");
     connect(clearButton, &QPushButton::clicked, this, &MainWindow::clearAll);
     headerButtons->addWidget(clearButton);
     headerButtons->addWidget(themeButton);
+    headerButtons->addWidget(optionsButton);
     headerButtons->addWidget(aboutButton);
 
     header->addWidget(title, 0, 0);
@@ -703,7 +711,13 @@ void MainWindow::startVerification()
     }
 
     verificationController.start(
-        filePath, expectedChecksum, algorithm, verificationFileSize, jobToken, autoSet);
+        filePath,
+        expectedChecksum,
+        algorithm,
+        verificationFileSize,
+        jobToken,
+        autoSet,
+        appSettings.unbufferedReads ? iso::IoPolicy::Unbuffered : iso::IoPolicy::Buffered);
 }
 
 void MainWindow::cancelVerification()
@@ -891,6 +905,33 @@ void MainWindow::showAbout()
     if (aboutBox.clickedButton() == githubButton) {
         QDesktopServices::openUrl(QUrl(QString::fromLatin1(AppProfileUrl)));
     }
+}
+
+void MainWindow::showOptionsMenu()
+{
+    QMenu menu(this);
+    // Off by default in QMenu, and this entry is the kind that needs explaining.
+    menu.setToolTipsVisible(true);
+
+    QAction* unbufferedAction = menu.addAction(QStringLiteral("Bypass the system file cache"));
+    unbufferedAction->setCheckable(true);
+    unbufferedAction->setChecked(appSettings.unbufferedReads);
+    // Changing this mid-run would not affect the job already reading, so the
+    // choice is frozen while one is in flight rather than appearing to apply.
+    unbufferedAction->setEnabled(!verificationRunning);
+    unbufferedAction->setToolTip(
+        QStringLiteral("Reads the ISO without filling the system's file cache with it.\n"
+                       "Slightly slower for a file that is still cached, which is the\n"
+                       "usual case just after a download, but it leaves the rest of the\n"
+                       "system's cached data in place. Ignored where the file cannot be\n"
+                       "read this way."));
+    connect(unbufferedAction, &QAction::toggled, this, [this](bool checked) {
+        appSettings.unbufferedReads = checked;
+        // The digest is identical either way, so the cached hashes stay valid.
+        iso::saveAppSettings(appSettings);
+    });
+
+    menu.exec(optionsButton->mapToGlobal(QPoint(0, optionsButton->height())));
 }
 
 void MainWindow::toggleTheme()

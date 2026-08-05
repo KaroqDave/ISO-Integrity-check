@@ -24,7 +24,8 @@ void VerificationController::start(
     const QString& algorithm,
     qint64 fileSize,
     quint64 jobToken,
-    const QStringList& alsoCompute)
+    const QStringList& alsoCompute,
+    iso::IoPolicy ioPolicy)
 {
     if (running_) {
         return;
@@ -40,6 +41,7 @@ void VerificationController::start(
          expectedChecksum,
          algorithm,
          alsoCompute,
+         ioPolicy,
          jobToken,
          fileSize,
          cancelToken = activeCancelToken_]() {
@@ -75,7 +77,13 @@ void VerificationController::start(
                     };
 
                 result = iso::verifyChecksum(
-                    filePath, expectedChecksum, algorithm, std::move(progressCallback), cancelToken, alsoCompute);
+                    filePath,
+                    expectedChecksum,
+                    algorithm,
+                    std::move(progressCallback),
+                    cancelToken,
+                    alsoCompute,
+                    ioPolicy);
             } catch (const std::exception& error) {
                 result = {iso::VerificationStatus::Error, QString::fromUtf8(error.what()), {}, std::nullopt};
             }

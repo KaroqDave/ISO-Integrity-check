@@ -79,6 +79,7 @@ class MainWindow : public QMainWindow {
     void copyComputedHash();
     void clearAll();
     void showAbout();
+    void showOptionsMenu();
     void toggleTheme();
     void applyCurrentTheme();
     void refreshStatusBadge();
@@ -115,6 +116,7 @@ class MainWindow : public QMainWindow {
     QPushButton* importButton = nullptr;
     QPushButton* clearButton = nullptr;
     QPushButton* themeButton = nullptr;
+    QPushButton* optionsButton = nullptr;
     QLabel* statusLabel = nullptr;
     QLabel* detailLabel = nullptr;
     QLabel* expectedHintLabel = nullptr;

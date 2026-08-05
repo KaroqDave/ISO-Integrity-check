@@ -24,7 +24,8 @@ class VerificationController : public QObject {
         const QString& algorithm,
         qint64 fileSize,
         quint64 jobToken,
-        const QStringList& alsoCompute = {});
+        const QStringList& alsoCompute = {},
+        iso::IoPolicy ioPolicy = iso::IoPolicy::Buffered);
 
     void cancel();
 

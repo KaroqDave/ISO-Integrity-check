@@ -156,6 +156,8 @@ build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --ch
 
 With one algorithm the output keeps the `Algorithm:` / `Computed:` form. With several, each is listed as `<NAME>: <hash>`. When an expected checksum is supplied alongside several algorithms, the one whose length matches the expected value is the one verified, and the CLI prints `Verified against: <NAME>`.
 
+`--unbuffered` reads past the operating system's file cache rather than through it, so checking a large ISO does not evict the rest of the system's cached data. See [Performance](#performance) for when that is worth it.
+
 Exit codes: `0` = match or hash-only success, `1` = mismatch, `2` = error.
 
 On mismatch, the CLI prints `MISMATCH:` and the computed hash. Per-character diff highlighting and position summaries are GUI-only.
@@ -195,7 +197,25 @@ AppImage packaging also needs `curl`, `libfuse2`, and either `librsvg2-bin` (`rs
 
 On Windows, hashing uses the CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it. On Linux and other Unix-like systems, hashing uses OpenSSL/libcrypto when available and falls back to Qt's `QCryptographicHash` otherwise. File reading is overlapped with hashing for large ISO files.
 
-When several algorithms are requested (the GUI's **Auto** hash type, or `--all` / a comma-separated `--algorithm` in the CLI), the file is read once and every digest is fed from the same chunks, so the cost is one pass over the ISO rather than one per algorithm. That trades extra CPU for saved I/O, which is why it is opt-in: on a fast NVMe drive hashing can be CPU-bound, so computing all four is slower than computing one. It pays off when you want more than one digest, or when you expect to switch hash types afterwards.
+When several algorithms are requested (the GUI's **Auto** hash type, or `--all` / a comma-separated `--algorithm` in the CLI), the file is read once and every digest is fed from the same chunks, so the cost is one pass over the ISO rather than one per algorithm. The digests also run concurrently, one core each, so the total is set by the *slowest* algorithm rather than the sum of all of them. On a 4 GiB file, SHA256+SHA512 costs about what SHA512 costs alone, and all four algorithms together cost roughly 3.4x a lone SHA256 rather than 9.4x.
+
+A single digest cannot be spread across cores — SHA-2 chains each block onto the previous one — so asking for more algorithms is still never free. It is just far cheaper than it used to be.
+
+### Buffered and unbuffered reads
+
+By default the file is read through the operating system's cache, which is the faster choice for the case this app sees most: checking an ISO that was just downloaded and is therefore still largely in memory.
+
+**Options → Bypass the system file cache** in the GUI, or `--unbuffered` on the CLI, reads past that cache instead. The GUI setting is remembered between runs and applies to the next verification you start. It is not a speed option — on a warm file it is slightly slower, because the digest no longer finds its input already in the CPU's caches. What it buys is restraint: verifying a 5 GB ISO no longer evicts several gigabytes of whatever else the system had cached to make room for bytes that will never be read twice. On a genuinely cold file it is also the quicker path, since nothing is copied by way of the cache. On Windows this uses unbuffered overlapped reads with several requests in flight; on Linux the pages are released after each chunk instead, which reaches the same goal without `O_DIRECT`'s filesystem restrictions. Where unbuffered reads are not possible — NTFS-compressed or encrypted files, some network shares — the app quietly falls back to buffered ones.
+
+### Measuring it yourself
+
+`iso-hash-bench` reports whether hashing on your machine is limited by the disk or by the digest, which is the only thing that decides where further tuning would help:
+
+```bash
+./build/Release/iso-hash-bench --size 4096
+```
+
+It generates a temporary sample (or use `--file` on a real ISO), then times a read-only pass in both I/O modes, each algorithm on both the native and Qt backends, and all of them in one combined pass. Note that a sample smaller than your free memory will be served from the page cache, so the read figure measures RAM rather than the drive. Pass `-DISO_BUILD_BENCH=OFF` to CMake to skip building the tool.
 
 ## Supported Hashes
 
