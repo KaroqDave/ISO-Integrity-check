@@ -33,12 +33,15 @@ inline CancelToken makeCancelToken()
     return std::make_shared<std::atomic<bool>>(false);
 }
 
+// Throws std::runtime_error when the file cannot be opened or is not read to
+// completion. Prefer verifyChecksum(), which reports those as an Error result.
 QString calculateFileHash(
     const QString& filePath,
     const QString& algorithm,
     ProgressCallback progressCallback = {},
     CancelToken cancelToken = {});
 
+// Never throws: I/O and hashing failures come back as VerificationStatus::Error.
 VerificationResult verifyChecksum(
     const QString& filePath,
     const QString& expectedChecksum,

@@ -124,4 +124,5 @@ class MainWindow : public QMainWindow {
 
     QElapsedTimer progressElapsedTimer;
     qint64 lastProgressBytes = 0;
+    double smoothedBytesPerSecond = -1.0;
 };

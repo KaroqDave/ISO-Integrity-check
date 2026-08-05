@@ -194,6 +194,9 @@ class DropTargetEventFilter : public QObject {
 
 constexpr int ProgressBarScale = 1000;
 
+// Weight given to the newest throughput sample when updating the running average.
+constexpr double ThroughputSmoothing = 0.25;
+
 int progressBarValueForBytes(qint64 bytesRead, qint64 totalBytes)
 {
     if (totalBytes <= 0) {
@@ -649,6 +652,7 @@ void MainWindow::startVerification()
     clearMismatchHighlight();
 
     lastProgressBytes = 0;
+    smoothedBytesPerSecond = -1.0;
     progressElapsedTimer.restart();
 
     if (verificationFileSize > 0) {
@@ -734,16 +738,32 @@ void MainWindow::updateProgress(qint64 bytesRead)
         return;
     }
 
-    double bytesPerSecond = -1.0;
+    if (bytesRead < lastProgressBytes) {
+        // The hashing backend fell back and restarted from byte 0; drop the rate
+        // history so the estimate rebuilds from the new attempt.
+        lastProgressBytes = bytesRead;
+        smoothedBytesPerSecond = -1.0;
+        progressElapsedTimer.restart();
+        return;
+    }
+
     const qint64 elapsedMs = progressElapsedTimer.elapsed();
     if (elapsedMs > 0 && bytesRead > lastProgressBytes) {
-        bytesPerSecond = (static_cast<double>(bytesRead - lastProgressBytes) * 1000.0) / static_cast<double>(elapsedMs);
+        const double instantBytesPerSecond =
+            (static_cast<double>(bytesRead - lastProgressBytes) * 1000.0) / static_cast<double>(elapsedMs);
+        // Exponential moving average: a single 100 ms sample swings wildly on
+        // spinning disks and network shares, which made the "time left" estimate
+        // jump around. Weighting the running average keeps it readable.
+        smoothedBytesPerSecond = smoothedBytesPerSecond < 0.0
+                                     ? instantBytesPerSecond
+                                     : (ThroughputSmoothing * instantBytesPerSecond) +
+                                           ((1.0 - ThroughputSmoothing) * smoothedBytesPerSecond);
     }
     lastProgressBytes = bytesRead;
     progressElapsedTimer.restart();
 
     if (verificationFileSize > 0) {
-        const QString detail = formatProgressDetail(bytesRead, verificationFileSize, bytesPerSecond);
+        const QString detail = formatProgressDetail(bytesRead, verificationFileSize, smoothedBytesPerSecond);
         progressBar->setValue(progressBarValueForBytes(bytesRead, verificationFileSize));
         progressBar->setFormat(detail);
         progressBar->setAccessibleDescription(detail);

@@ -51,9 +51,33 @@ void throwOnReadError(const QFile& file)
     }
 }
 
+// Guards against a silently truncated read. QFile::read() returns an empty
+// buffer both at EOF and when a driver hands back zero bytes without setting an
+// error (removable media pulled mid-read, a dropped network share). Without this
+// check the digest of a partial file would be reported as a legitimate result.
+void throwOnIncompleteRead(qint64 bytesHashed, qint64 expectedSize)
+{
+    if (expectedSize <= 0 || bytesHashed == expectedSize) {
+        return;
+    }
+
+    const QString detail = bytesHashed < expectedSize
+                               ? QStringLiteral("only %1 of %2 bytes could be read").arg(bytesHashed).arg(expectedSize)
+                               : QStringLiteral("%1 bytes were read but the file reported %2")
+                                     .arg(bytesHashed)
+                                     .arg(expectedSize);
+    throw std::runtime_error(QStringLiteral("The file was not read completely (%1). It may have been modified, or the "
+                                            "drive disconnected, during verification.")
+                                 .arg(detail)
+                                 .toStdString());
+}
+
 template <typename HashChunkFn>
 void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const CancelToken& cancelToken)
 {
+    const qint64 expectedSize = file.size();
+    qint64 totalBytesHashed = 0;
+
     std::mutex mutex;
     std::condition_variable ready;
     std::condition_variable consumed;
@@ -131,10 +155,12 @@ void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const CancelTok
         consumed.notify_one();
 
         throwIfCancelled(cancelToken);
+        totalBytesHashed += buffer.size();
         hashChunk(buffer);
     }
 
     throwIfCancelled(cancelToken);
+    throwOnIncompleteRead(totalBytesHashed, expectedSize);
 }
 
 #ifdef _WIN32
@@ -368,12 +394,23 @@ QString calculateFileHash(
             QStringLiteral("The selected file could not be opened: %1").arg(file.errorString()).toStdString());
     }
 
+    // A backend failure restarts the read from byte 0, so the listener must be
+    // told progress rewound — otherwise it keeps comparing against the byte
+    // count from the abandoned attempt and its throughput estimate stalls.
+    const auto restartAfterBackendFailure = [&]() {
+        file.seek(0);
+        if (progressCallback) {
+            progressCallback(0);
+        }
+    };
+    Q_UNUSED(restartAfterBackendFailure);
+
 #ifdef _WIN32
     if (LPCWSTR algorithmId = cngAlgorithmId(algorithm)) {
         try {
             return hashWithCng(file, algorithmId, progressCallback, cancelToken);
         } catch (const CngError&) {
-            file.seek(0);
+            restartAfterBackendFailure();
         }
     }
 #endif
@@ -383,7 +420,7 @@ QString calculateFileHash(
         try {
             return hashWithOpenSsl(file, algorithmId, progressCallback, cancelToken);
         } catch (const EvpError&) {
-            file.seek(0);
+            restartAfterBackendFailure();
         }
     }
 #endif
@@ -433,6 +470,13 @@ VerificationResult verifyChecksum(
         return {
             VerificationStatus::Cancelled,
             QStringLiteral("Verification cancelled."),
+            {},
+            std::nullopt,
+        };
+    } catch (const std::exception& error) {
+        return {
+            VerificationStatus::Error,
+            QString::fromUtf8(error.what()),
             {},
             std::nullopt,
         };

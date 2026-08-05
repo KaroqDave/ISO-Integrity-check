@@ -46,7 +46,11 @@ void VerificationController::start(
                         if (bytesRead == lastReportedBytes) {
                             return;
                         }
-                        const bool forceUpdate = fileSize > 0 && bytesRead >= fileSize;
+                        // Never throttle away the final update, or a rewind to a
+                        // lower byte count (a hashing backend fell back and
+                        // restarted the read) — the UI needs both to stay correct.
+                        const bool forceUpdate =
+                            (fileSize > 0 && bytesRead >= fileSize) || bytesRead < lastReportedBytes;
                         if (!forceUpdate && progressTimer.elapsed() < 100 && lastReportedBytes >= 0) {
                             return;
                         }
