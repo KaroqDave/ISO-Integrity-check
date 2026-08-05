@@ -49,6 +49,13 @@ class VerifierTests : public QObject {
     void multiChunkFileHashMatchesReference();
     void emptyFileHashesToTheEmptyDigest();
     void directoryPathIsReportedAsError();
+    void singlePassComputesEveryRequestedAlgorithm();
+    void singlePassAgreesWithSequentialHashingAcrossChunks();
+    void duplicateAlgorithmsAreCollapsed();
+    void unsupportedAlgorithmInListIsRejected();
+    void emptyAlgorithmListIsRejected();
+    void alsoComputeReturnsExtraHashesWithoutAffectingTheVerdict();
+    void singlePassReportsProgressOncePerChunk();
 };
 
 void ChecksumTests::calculatesAllSupportedAlgorithms()
@@ -526,6 +533,175 @@ void VerifierTests::directoryPathIsReportedAsError()
     const auto result = verifyChecksum(tempDir.path(), QString(64, QLatin1Char('0')), QStringLiteral("SHA256"));
     QCOMPARE(result.status, VerificationStatus::Error);
     QVERIFY(!result.matches.has_value());
+}
+
+namespace {
+
+QString writeSampleFile(const QTemporaryDir& tempDir, const QByteArray& data, const QString& name)
+{
+    const QString filePath = tempDir.path() + QLatin1Char('/') + name;
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size()) {
+        return {};
+    }
+    file.close();
+    return filePath;
+}
+
+QByteArray varyingBytes(qsizetype size)
+{
+    QByteArray data;
+    data.reserve(size);
+    for (qsizetype i = 0; i < size; ++i) {
+        data.append(static_cast<char>((i * 31 + (i >> 13)) & 0xFF));
+    }
+    return data;
+}
+
+} // namespace
+
+void VerifierTests::singlePassComputesEveryRequestedAlgorithm()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QByteArray data = "iso integrity test data";
+    const QString filePath = writeSampleFile(tempDir, data, QStringLiteral("sample.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    const auto hashes = calculateFileHashes(
+        filePath,
+        {QStringLiteral("SHA256"), QStringLiteral("SHA512"), QStringLiteral("SHA1"), QStringLiteral("MD5")});
+
+    QCOMPARE(hashes.size(), 4);
+    QCOMPARE(
+        hashes.value(QStringLiteral("SHA256")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()));
+    QCOMPARE(
+        hashes.value(QStringLiteral("SHA512")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex()));
+    QCOMPARE(
+        hashes.value(QStringLiteral("SHA1")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha1).toHex()));
+    QCOMPARE(
+        hashes.value(QStringLiteral("MD5")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Md5).toHex()));
+}
+
+void VerifierTests::singlePassAgreesWithSequentialHashingAcrossChunks()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    // Spans several internal 8 MB read-ahead buffers plus a partial tail, so a
+    // digest that was fed chunks out of order or skipped one would diverge.
+    const QByteArray data = varyingBytes((17 * 1024 * 1024) + 12345);
+    const QString filePath = writeSampleFile(tempDir, data, QStringLiteral("large.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    const auto combined =
+        calculateFileHashes(filePath, {QStringLiteral("SHA256"), QStringLiteral("SHA512"), QStringLiteral("MD5")});
+
+    QCOMPARE(combined.value(QStringLiteral("SHA256")), calculateFileHash(filePath, QStringLiteral("SHA256")));
+    QCOMPARE(combined.value(QStringLiteral("SHA512")), calculateFileHash(filePath, QStringLiteral("SHA512")));
+    QCOMPARE(combined.value(QStringLiteral("MD5")), calculateFileHash(filePath, QStringLiteral("MD5")));
+}
+
+void VerifierTests::duplicateAlgorithmsAreCollapsed()
+{
+    QTemporaryDir tempDir;
+    const QByteArray data = "iso integrity test data";
+    const QString filePath = writeSampleFile(tempDir, data, QStringLiteral("sample.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    const auto hashes = calculateFileHashes(
+        filePath, {QStringLiteral("SHA256"), QStringLiteral("SHA256"), QStringLiteral("SHA1")});
+
+    QCOMPARE(hashes.size(), 2);
+    QCOMPARE(
+        hashes.value(QStringLiteral("SHA256")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()));
+}
+
+void VerifierTests::unsupportedAlgorithmInListIsRejected()
+{
+    QTemporaryDir tempDir;
+    const QString filePath = writeSampleFile(tempDir, QByteArray("data"), QStringLiteral("sample.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    bool threw = false;
+    try {
+        calculateFileHashes(filePath, {QStringLiteral("SHA256"), QStringLiteral("CRC32")});
+    } catch (const std::exception& error) {
+        threw = true;
+        QVERIFY(QString::fromUtf8(error.what()).contains(QStringLiteral("CRC32")));
+    }
+    QVERIFY(threw);
+}
+
+void VerifierTests::emptyAlgorithmListIsRejected()
+{
+    QTemporaryDir tempDir;
+    const QString filePath = writeSampleFile(tempDir, QByteArray("data"), QStringLiteral("sample.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    bool threw = false;
+    try {
+        calculateFileHashes(filePath, {});
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    QVERIFY(threw);
+}
+
+void VerifierTests::alsoComputeReturnsExtraHashesWithoutAffectingTheVerdict()
+{
+    QTemporaryDir tempDir;
+    const QByteArray data = "iso integrity test data";
+    const QString filePath = writeSampleFile(tempDir, data, QStringLiteral("sample.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    const QString expected = QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+    const auto result = verifyChecksum(
+        filePath,
+        expected,
+        QStringLiteral("SHA256"),
+        {},
+        {},
+        {QStringLiteral("SHA512"), QStringLiteral("MD5"), QStringLiteral("NOT_A_HASH")});
+
+    QCOMPARE(result.status, VerificationStatus::Match);
+    QCOMPARE(result.computedHash, expected);
+    // The unsupported name is ignored rather than failing the whole run.
+    QCOMPARE(result.computedHashes.size(), 3);
+    QCOMPARE(
+        result.computedHashes.value(QStringLiteral("SHA512")),
+        QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha512).toHex()));
+    QVERIFY(!result.computedHashes.contains(QStringLiteral("NOT_A_HASH")));
+}
+
+void VerifierTests::singlePassReportsProgressOncePerChunk()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QByteArray data = varyingBytes((17 * 1024 * 1024) + 999);
+    const QString filePath = writeSampleFile(tempDir, data, QStringLiteral("large.iso"));
+    QVERIFY(!filePath.isEmpty());
+
+    // Progress must track bytes read, not bytes fed to digests — otherwise three
+    // algorithms would report three times the file size.
+    QList<qint64> reported;
+    calculateFileHashes(
+        filePath,
+        {QStringLiteral("SHA256"), QStringLiteral("SHA512"), QStringLiteral("MD5")},
+        [&reported](qint64 bytesRead) { reported.append(bytesRead); });
+
+    QVERIFY(!reported.isEmpty());
+    QCOMPARE(reported.last(), static_cast<qint64>(data.size()));
+    for (qsizetype i = 1; i < reported.size(); ++i) {
+        QVERIFY(reported.at(i) > reported.at(i - 1));
+    }
 }
 
 int main(int argc, char* argv[])

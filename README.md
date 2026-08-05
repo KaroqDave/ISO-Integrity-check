@@ -15,6 +15,7 @@ The app is built with C++ and Qt 6, with a matching headless CLI for scripting.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
 - **Drag and drop** an ISO or checksum file straight onto the matching section.
 - **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback.
+- **Single-pass multi-hashing**: tick *Compute all hash types in one pass* (or use `--all` in the CLI) to compute every algorithm from one read of the ISO. Switching the hash type afterwards is instant instead of re-reading a multi-gigabyte file.
 - **Light, dark, and system themes**, and it remembers your window, theme, and last-used folders between runs.
 - **Headless CLI** (`iso-integrity-check-cli`) that shares the same core for scripting and automation.
 - **Cross-platform**: native Windows build and a portable Linux AppImage.
@@ -125,6 +126,15 @@ build\Release\iso-integrity-check-cli.exe --file "C:\Downloads\example.iso" --ch
 ./build/iso-integrity-check-cli --file ./example.iso --algorithm SHA256
 ```
 
+`--algorithm` also accepts a comma-separated list, and `--all` covers every supported algorithm. Either way the file is read once and all requested digests are computed from that single pass:
+
+```bash
+./build/iso-integrity-check-cli --file ./example.iso --algorithm SHA256,SHA512
+./build/iso-integrity-check-cli --file ./example.iso --all
+```
+
+With one algorithm the output keeps the `Algorithm:` / `Computed:` form. With several, each is listed as `<NAME>: <hash>`. When an expected checksum is supplied alongside several algorithms, the one whose length matches the expected value is the one verified, and the CLI prints `Verified against: <NAME>`.
+
 Exit codes: `0` = match or hash-only success, `1` = mismatch, `2` = error.
 
 On mismatch, the CLI prints `MISMATCH:` and the computed hash. Per-character diff highlighting and position summaries are GUI-only.
@@ -164,6 +174,8 @@ AppImage packaging also needs `curl`, `libfuse2`, and either `librsvg2-bin` (`rs
 
 On Windows, hashing uses the CNG (BCrypt) API, which is hardware-accelerated (SHA-NI) when the CPU supports it. On Linux and other Unix-like systems, hashing uses OpenSSL/libcrypto when available and falls back to Qt's `QCryptographicHash` otherwise. File reading is overlapped with hashing for large ISO files.
 
+When several algorithms are requested, the file is read once and every digest is fed from the same chunks, so the cost is one pass over the ISO rather than one per algorithm. That trades extra CPU for saved I/O, which is why it is opt-in: on a fast NVMe drive hashing can be CPU-bound, so computing all four is slower than computing one. It pays off when you want more than one digest, or when you expect to switch hash types afterwards.
+
 ## Supported Hashes
 
 - SHA256
@@ -202,6 +214,8 @@ If a checksum file contains multiple entries, the app prefers the line matching 
 4. Click **Calculate / Verify**.
 
 While verification runs, the button changes to **Cancel** so you can stop a long hash on a large ISO. Leave the expected checksum empty to calculate the hash only — the app will show the computed value without comparing it.
+
+Tick **Compute all hash types in one pass** before verifying to compute SHA256, SHA512, SHA1, and MD5 from a single read. Afterwards, changing the hash type reuses the already-computed value instead of re-reading the ISO. Without it, changing the hash type clears the computed field, since a digest from one algorithm must not be shown under another's label.
 
 On a mismatch, the expected and computed fields are outlined in orange and a comparison panel appears below the result, highlighting every differing character and listing the 1-based positions of the differences.
 

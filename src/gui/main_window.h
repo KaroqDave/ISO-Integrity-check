@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QUrl>
 
+class QCheckBox;
 class QCloseEvent;
 class QComboBox;
 class QDragEnterEvent;
@@ -86,6 +87,10 @@ class MainWindow : public QMainWindow {
     QString resultDetail(const iso::VerificationResult& result) const;
     QString currentAlgorithm() const;
     void setAlgorithm(const QString& algorithm);
+    void onAlgorithmChanged();
+    QString currentFileIdentity() const;
+    void cacheComputedHashes(const QHash<QString, QString>& hashes);
+    void clearHashCache();
     quint64 nextJobToken();
     bool isIsoPath(const QString& path) const;
     bool isChecksumPath(const QString& path) const;
@@ -107,8 +112,15 @@ class MainWindow : public QMainWindow {
     QLabel* detailLabel = nullptr;
     QLabel* expectedHintLabel = nullptr;
     QTextEdit* mismatchDetailView = nullptr;
+    QCheckBox* computeAllCheckBox = nullptr;
     QGroupBox* fileSection = nullptr;
     QGroupBox* inputSection = nullptr;
+
+    // Hashes already computed for the file currently in fileEdit, so switching the
+    // algorithm after a run does not re-read the ISO. Keyed by algorithm name and
+    // guarded by a path+size+mtime identity so an edited file invalidates it.
+    QString cachedFileIdentity;
+    QHash<QString, QString> cachedHashes;
 
     VerificationController verificationController;
     iso::AppSettings appSettings;

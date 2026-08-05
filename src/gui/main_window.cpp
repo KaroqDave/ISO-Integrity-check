@@ -4,9 +4,11 @@
 #include "gui/theme.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -405,10 +407,16 @@ QWidget* MainWindow::buildInputSection()
     expectedEdit->setAccessibleName(QStringLiteral("Expected checksum"));
     expectedEdit->setAccessibleDescription(QStringLiteral("Official checksum to compare against the computed hash"));
     connect(expectedEdit, &QLineEdit::textChanged, this, [this]() { updateExpectedValidation(true); });
-    connect(algorithmCombo, &QComboBox::currentTextChanged, this, [this]() { updateExpectedValidation(false); });
+    connect(algorithmCombo, &QComboBox::currentTextChanged, this, &MainWindow::onAlgorithmChanged);
     expectedHintLabel = new QLabel;
     expectedHintLabel->setObjectName(QStringLiteral("footnote"));
     expectedHintLabel->setWordWrap(true);
+    computeAllCheckBox = new QCheckBox(QStringLiteral("Compute all hash types in one pass"));
+    computeAllCheckBox->setToolTip(QStringLiteral(
+        "Reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together.\n"
+        "Switching the hash type afterwards is instant instead of re-reading the file.\n"
+        "Uses more CPU, so leave it off if you only need one hash."));
+    computeAllCheckBox->setCursor(Qt::PointingHandCursor);
     importButton = styledButton(QStringLiteral("Import checksum file..."), "secondary");
     connect(importButton, &QPushButton::clicked, this, &MainWindow::browseChecksumFile);
     inputLayout->addWidget(fieldLabel(QStringLiteral("Hash type")), 0, 0);
@@ -417,6 +425,7 @@ QWidget* MainWindow::buildInputSection()
     inputLayout->addWidget(fieldLabel(QStringLiteral("Expected checksum")), 1, 0);
     inputLayout->addWidget(expectedEdit, 1, 1, 1, 2);
     inputLayout->addWidget(expectedHintLabel, 2, 1, 1, 2);
+    inputLayout->addWidget(computeAllCheckBox, 3, 1, 1, 2);
     inputLayout->setColumnStretch(1, 1);
     return inputSection;
 }
@@ -542,6 +551,10 @@ void MainWindow::setIsoFile(const QString& path)
 {
     fileEdit->setText(path);
     fileEdit->setToolTip(path);
+    // Any previously computed hash described a different file; leaving it on
+    // screen under the new filename would misrepresent it.
+    setComputedHash({});
+    clearMismatchHighlight();
     setStatus(
         iso::VerificationStatus::Generated, QStringLiteral("ISO selected. Paste or import the matching checksum."));
     updateExpectedValidation();
@@ -666,7 +679,10 @@ void MainWindow::startVerification()
         progressBar->setFormat(QStringLiteral("Calculating..."));
     }
 
-    verificationController.start(filePath, expectedChecksum, algorithm, verificationFileSize, jobToken);
+    const QStringList alsoCompute =
+        (computeAllCheckBox && computeAllCheckBox->isChecked()) ? iso::supportedHashNames() : QStringList{};
+    verificationController.start(
+        filePath, expectedChecksum, algorithm, verificationFileSize, jobToken, alsoCompute);
 }
 
 void MainWindow::cancelVerification()
@@ -689,6 +705,7 @@ void MainWindow::finishVerification(const iso::VerificationResult& result, quint
     }
 
     setRunning(false);
+    cacheComputedHashes(result.computedHashes);
 
     if (result.status == iso::VerificationStatus::Mismatch) {
         applyMismatchHighlight(activeExpectedChecksum, result.computedHash);
@@ -706,6 +723,14 @@ void MainWindow::finishVerification(const iso::VerificationResult& result, quint
     if (!result.computedHash.isEmpty()) {
         setComputedHash(result.computedHash);
     }
+
+    if (result.computedHashes.size() > 1) {
+        const QString others = QStringLiteral("%1 hash types computed in one read pass — switching the hash "
+                                              "type above is instant.")
+                                   .arg(result.computedHashes.size());
+        detailLabel->setText(detailLabel->text().isEmpty() ? others
+                                                           : QStringLiteral("%1 %2").arg(detailLabel->text(), others));
+    }
 }
 
 void MainWindow::setRunning(bool running)
@@ -720,6 +745,9 @@ void MainWindow::setRunning(bool running)
     expectedEdit->setEnabled(!running);
     computedEdit->setEnabled(!running);
     algorithmCombo->setEnabled(!running);
+    if (computeAllCheckBox) {
+        computeAllCheckBox->setEnabled(!running);
+    }
     browseIsoButton->setEnabled(!running);
     importButton->setEnabled(!running);
     clearButton->setEnabled(!running);
@@ -815,6 +843,7 @@ void MainWindow::clearAll()
         awaitActiveWorker();
     }
 
+    clearHashCache();
     fileEdit->clear();
     fileEdit->setToolTip({});
     expectedEdit->clear();
@@ -1024,6 +1053,107 @@ void MainWindow::setAlgorithm(const QString& algorithm)
             return;
         }
     }
+}
+
+QString MainWindow::currentFileIdentity() const
+{
+    const QString path = fileEdit ? fileEdit->text() : QString{};
+    if (path.isEmpty()) {
+        return {};
+    }
+
+    const QFileInfo info(path);
+    if (!info.exists() || !info.isFile()) {
+        return {};
+    }
+    return QStringLiteral("%1|%2|%3")
+        .arg(info.absoluteFilePath())
+        .arg(info.size())
+        .arg(info.lastModified().toMSecsSinceEpoch());
+}
+
+void MainWindow::cacheComputedHashes(const QHash<QString, QString>& hashes)
+{
+    const QString identity = currentFileIdentity();
+    if (identity.isEmpty() || hashes.isEmpty()) {
+        return;
+    }
+
+    if (cachedFileIdentity != identity) {
+        cachedFileIdentity = identity;
+        cachedHashes.clear();
+    }
+    for (auto it = hashes.constBegin(); it != hashes.constEnd(); ++it) {
+        cachedHashes.insert(it.key(), it.value());
+    }
+}
+
+void MainWindow::clearHashCache()
+{
+    cachedFileIdentity.clear();
+    cachedHashes.clear();
+}
+
+void MainWindow::onAlgorithmChanged()
+{
+    updateExpectedValidation(false);
+
+    if (verificationRunning) {
+        return;
+    }
+
+    // The computed field belongs to whichever algorithm produced it. Showing a
+    // SHA256 digest under a SHA512 label would be actively misleading, so either
+    // swap in the cached value for the newly selected algorithm or blank it.
+    const QString algorithm = currentAlgorithm();
+    const QString identity = currentFileIdentity();
+    const bool cacheApplies = !identity.isEmpty() && identity == cachedFileIdentity;
+    const QString cached = cacheApplies ? cachedHashes.value(algorithm) : QString{};
+
+    if (cached.isEmpty()) {
+        if (computedEdit && !computedEdit->text().isEmpty()) {
+            setComputedHash({});
+            clearMismatchHighlight();
+            setStatus(
+                iso::VerificationStatus::Generated,
+                QStringLiteral("Hash type changed to %1.").arg(algorithm),
+                QStringLiteral("Select Calculate / Verify to compute it."));
+        }
+        return;
+    }
+
+    setComputedHash(cached);
+    clearMismatchHighlight();
+
+    const QString expected = iso::normalizeChecksum(expectedEdit ? expectedEdit->text() : QString{});
+    if (expected.isEmpty()) {
+        setStatus(
+            iso::VerificationStatus::Generated,
+            QStringLiteral("Checksum calculated. Paste or import an official checksum to verify integrity."),
+            QStringLiteral("Reused the %1 hash from the last run — no re-read needed.").arg(algorithm));
+        return;
+    }
+
+    if (expected == cached) {
+        setStatus(
+            iso::VerificationStatus::Match,
+            QStringLiteral("The ISO checksum matches the expected value."),
+            QStringLiteral("Compared against the %1 hash from the last run.").arg(algorithm));
+        return;
+    }
+
+    activeExpectedChecksum = expected;
+    applyMismatchHighlight(expected, cached);
+    QString detail = QStringLiteral("Compared against the %1 hash from the last run.").arg(algorithm);
+    const QString summary =
+        iso::formatChecksumMismatchSummary(iso::checksumMismatchPositions(expected, cached));
+    if (!summary.isEmpty()) {
+        detail = QStringLiteral("%1 %2").arg(detail, summary);
+    }
+    setStatus(
+        iso::VerificationStatus::Mismatch,
+        QStringLiteral("The ISO checksum does not match the expected value."),
+        detail);
 }
 
 QString MainWindow::resultDetail(const iso::VerificationResult& result) const

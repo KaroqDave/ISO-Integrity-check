@@ -163,10 +163,26 @@ void hashFileWithReadAhead(QFile& file, HashChunkFn&& hashChunk, const CancelTok
     throwOnIncompleteRead(totalBytesHashed, expectedSize);
 }
 
+// One digest being fed the file's bytes. Wrapping each backend behind this lets
+// a single read pass drive several algorithms at once, so computing SHA256 and
+// SHA512 for an ISO costs one read instead of two.
+class Hasher {
+  public:
+    virtual ~Hasher() = default;
+    virtual void update(const char* data, qsizetype length) = 0;
+    virtual QByteArray finish() = 0;
+};
+
+// Thrown when a native backend fails. The caller retries the whole pass with Qt
+// hashing rather than leaving some digests native and others not.
+struct NativeBackendError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 #ifdef _WIN32
 
-struct CngError : std::runtime_error {
-    using std::runtime_error::runtime_error;
+struct CngError : NativeBackendError {
+    using NativeBackendError::NativeBackendError;
 };
 
 LPCWSTR cngAlgorithmId(const QString& algorithm)
@@ -186,7 +202,7 @@ LPCWSTR cngAlgorithmId(const QString& algorithm)
     return nullptr;
 }
 
-class CngHasher {
+class CngHasher final : public Hasher {
   public:
     explicit CngHasher(LPCWSTR algorithmId)
     {
@@ -200,7 +216,7 @@ class CngHasher {
         }
     }
 
-    ~CngHasher()
+    ~CngHasher() override
     {
         if (hash_) {
             BCryptDestroyHash(hash_);
@@ -213,7 +229,7 @@ class CngHasher {
     CngHasher(const CngHasher&) = delete;
     CngHasher& operator=(const CngHasher&) = delete;
 
-    void update(const char* data, qsizetype length)
+    void update(const char* data, qsizetype length) override
     {
         if (length <= 0) {
             return;
@@ -224,7 +240,7 @@ class CngHasher {
         }
     }
 
-    QByteArray finish()
+    QByteArray finish() override
     {
         DWORD hashLength = 0;
         DWORD written = 0;
@@ -246,32 +262,12 @@ class CngHasher {
     BCRYPT_HASH_HANDLE hash_ = nullptr;
 };
 
-QString
-hashWithCng(QFile& file, LPCWSTR algorithmId, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
-{
-    CngHasher hasher(algorithmId);
-    qint64 bytesRead = 0;
-
-    hashFileWithReadAhead(
-        file,
-        [&](const QByteArray& chunk) {
-            hasher.update(chunk.constData(), chunk.size());
-            bytesRead += chunk.size();
-            if (progressCallback) {
-                progressCallback(bytesRead);
-            }
-        },
-        cancelToken);
-
-    return QString::fromLatin1(hasher.finish().toHex());
-}
-
 #endif // _WIN32
 
 #ifdef ISO_HAS_OPENSSL
 
-struct EvpError : std::runtime_error {
-    using std::runtime_error::runtime_error;
+struct EvpError : NativeBackendError {
+    using NativeBackendError::NativeBackendError;
 };
 
 const EVP_MD* evpAlgorithm(const QString& algorithm)
@@ -291,7 +287,7 @@ const EVP_MD* evpAlgorithm(const QString& algorithm)
     return nullptr;
 }
 
-class EvpHasher {
+class EvpHasher final : public Hasher {
   public:
     explicit EvpHasher(const EVP_MD* algorithm) : context_(EVP_MD_CTX_new())
     {
@@ -303,12 +299,12 @@ class EvpHasher {
         }
     }
 
-    ~EvpHasher() { EVP_MD_CTX_free(context_); }
+    ~EvpHasher() override { EVP_MD_CTX_free(context_); }
 
     EvpHasher(const EvpHasher&) = delete;
     EvpHasher& operator=(const EvpHasher&) = delete;
 
-    void update(const char* data, qsizetype length)
+    void update(const char* data, qsizetype length) override
     {
         if (length <= 0) {
             return;
@@ -318,7 +314,7 @@ class EvpHasher {
         }
     }
 
-    QByteArray finish()
+    QByteArray finish() override
     {
         QByteArray result(EVP_MAX_MD_SIZE, '\0');
         unsigned int hashLength = 0;
@@ -333,41 +329,80 @@ class EvpHasher {
     EVP_MD_CTX* context_ = nullptr;
 };
 
-QString hashWithOpenSsl(
-    QFile& file, const EVP_MD* algorithm, const ProgressCallback& progressCallback, const CancelToken& cancelToken)
-{
-    EvpHasher hasher(algorithm);
-    qint64 bytesRead = 0;
-
-    hashFileWithReadAhead(
-        file,
-        [&](const QByteArray& chunk) {
-            hasher.update(chunk.constData(), chunk.size());
-            bytesRead += chunk.size();
-            if (progressCallback) {
-                progressCallback(bytesRead);
-            }
-        },
-        cancelToken);
-
-    return QString::fromLatin1(hasher.finish().toHex());
-}
-
 #endif // ISO_HAS_OPENSSL
 
-QString hashWithQt(
+class QtHasher final : public Hasher {
+  public:
+    explicit QtHasher(QCryptographicHash::Algorithm algorithm) : digest_(algorithm) {}
+
+    void update(const char* data, qsizetype length) override
+    {
+        if (length <= 0) {
+            return;
+        }
+        digest_.addData(QByteArrayView(data, length));
+    }
+
+    QByteArray finish() override { return digest_.result(); }
+
+  private:
+    QCryptographicHash digest_;
+};
+
+// Returns nullptr when no native backend covers this algorithm, in which case
+// the caller falls back to Qt. Construction failures surface as
+// NativeBackendError so the whole pass restarts on Qt hashing.
+std::unique_ptr<Hasher> makeNativeHasher(const QString& algorithm)
+{
+#ifdef _WIN32
+    if (LPCWSTR algorithmId = cngAlgorithmId(algorithm)) {
+        return std::make_unique<CngHasher>(algorithmId);
+    }
+#endif
+#ifdef ISO_HAS_OPENSSL
+    if (const EVP_MD* algorithmId = evpAlgorithm(algorithm)) {
+        return std::make_unique<EvpHasher>(algorithmId);
+    }
+#endif
+    Q_UNUSED(algorithm);
+    return nullptr;
+}
+
+struct NamedHasher {
+    QString algorithm;
+    std::unique_ptr<Hasher> hasher;
+};
+
+// Reads the file once and feeds every chunk to all requested digests.
+QHash<QString, QString> hashInOnePass(
     QFile& file,
-    QCryptographicHash::Algorithm algorithm,
+    const QStringList& algorithms,
+    bool useNativeBackends,
     const ProgressCallback& progressCallback,
     const CancelToken& cancelToken)
 {
-    QCryptographicHash digest(algorithm);
-    qint64 bytesRead = 0;
+    const auto& hashes = supportedHashes();
+    std::vector<NamedHasher> hashers;
+    hashers.reserve(static_cast<size_t>(algorithms.size()));
 
+    for (const QString& algorithm : algorithms) {
+        std::unique_ptr<Hasher> hasher;
+        if (useNativeBackends) {
+            hasher = makeNativeHasher(algorithm);
+        }
+        if (!hasher) {
+            hasher = std::make_unique<QtHasher>(hashes.value(algorithm).qtAlgorithm);
+        }
+        hashers.push_back(NamedHasher{algorithm, std::move(hasher)});
+    }
+
+    qint64 bytesRead = 0;
     hashFileWithReadAhead(
         file,
         [&](const QByteArray& chunk) {
-            digest.addData(chunk);
+            for (NamedHasher& entry : hashers) {
+                entry.hasher->update(chunk.constData(), chunk.size());
+            }
             bytesRead += chunk.size();
             if (progressCallback) {
                 progressCallback(bytesRead);
@@ -375,18 +410,41 @@ QString hashWithQt(
         },
         cancelToken);
 
-    return QString::fromLatin1(digest.result().toHex());
+    QHash<QString, QString> results;
+    results.reserve(static_cast<qsizetype>(hashers.size()));
+    for (NamedHasher& entry : hashers) {
+        results.insert(entry.algorithm, QString::fromLatin1(entry.hasher->finish().toHex()));
+    }
+    return results;
+}
+
+// Drops duplicates while preserving the caller's order, and rejects unknown names.
+QStringList normalizeAlgorithmList(const QStringList& algorithms)
+{
+    QStringList unique;
+    for (const QString& algorithm : algorithms) {
+        if (!supportedHashes().contains(algorithm)) {
+            throw std::runtime_error(QStringLiteral("Unsupported hash algorithm: %1").arg(algorithm).toStdString());
+        }
+        if (!unique.contains(algorithm)) {
+            unique.append(algorithm);
+        }
+    }
+    if (unique.isEmpty()) {
+        throw std::runtime_error("No hash algorithm was requested.");
+    }
+    return unique;
 }
 
 } // namespace
 
-QString calculateFileHash(
-    const QString& filePath, const QString& algorithm, ProgressCallback progressCallback, CancelToken cancelToken)
+QHash<QString, QString> calculateFileHashes(
+    const QString& filePath,
+    const QStringList& algorithms,
+    ProgressCallback progressCallback,
+    CancelToken cancelToken)
 {
-    const auto hashes = supportedHashes();
-    if (!hashes.contains(algorithm)) {
-        throw std::runtime_error(QStringLiteral("Unsupported hash algorithm: %1").arg(algorithm).toStdString());
-    }
+    const QStringList requested = normalizeAlgorithmList(algorithms);
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -394,38 +452,25 @@ QString calculateFileHash(
             QStringLiteral("The selected file could not be opened: %1").arg(file.errorString()).toStdString());
     }
 
-    // A backend failure restarts the read from byte 0, so the listener must be
-    // told progress rewound — otherwise it keeps comparing against the byte
-    // count from the abandoned attempt and its throughput estimate stalls.
-    const auto restartAfterBackendFailure = [&]() {
+    try {
+        return hashInOnePass(file, requested, true, progressCallback, cancelToken);
+    } catch (const NativeBackendError&) {
+        // Restart the whole pass on Qt hashing. The listener is told progress
+        // rewound, otherwise it keeps comparing against the byte count from the
+        // abandoned attempt and its throughput estimate stalls.
         file.seek(0);
         if (progressCallback) {
             progressCallback(0);
         }
-    };
-    Q_UNUSED(restartAfterBackendFailure);
-
-#ifdef _WIN32
-    if (LPCWSTR algorithmId = cngAlgorithmId(algorithm)) {
-        try {
-            return hashWithCng(file, algorithmId, progressCallback, cancelToken);
-        } catch (const CngError&) {
-            restartAfterBackendFailure();
-        }
+        return hashInOnePass(file, requested, false, progressCallback, cancelToken);
     }
-#endif
+}
 
-#ifdef ISO_HAS_OPENSSL
-    if (const EVP_MD* algorithmId = evpAlgorithm(algorithm)) {
-        try {
-            return hashWithOpenSsl(file, algorithmId, progressCallback, cancelToken);
-        } catch (const EvpError&) {
-            restartAfterBackendFailure();
-        }
-    }
-#endif
-
-    return hashWithQt(file, hashes.value(algorithm).qtAlgorithm, progressCallback, cancelToken);
+QString calculateFileHash(
+    const QString& filePath, const QString& algorithm, ProgressCallback progressCallback, CancelToken cancelToken)
+{
+    return calculateFileHashes(filePath, {algorithm}, std::move(progressCallback), std::move(cancelToken))
+        .value(algorithm);
 }
 
 VerificationResult verifyChecksum(
@@ -433,7 +478,8 @@ VerificationResult verifyChecksum(
     const QString& expectedChecksum,
     const QString& algorithm,
     ProgressCallback progressCallback,
-    CancelToken cancelToken)
+    CancelToken cancelToken,
+    const QStringList& alsoCompute)
 {
     const QFileInfo info(filePath);
     if (filePath.isEmpty()) {
@@ -464,8 +510,16 @@ VerificationResult verifyChecksum(
     const QString normalizedExpected = normalizeChecksum(expectedChecksum);
 
     QString computedHash;
+    QHash<QString, QString> computedHashes;
     try {
-        computedHash = calculateFileHash(filePath, algorithm, std::move(progressCallback), cancelToken);
+        QStringList requested{algorithm};
+        for (const QString& extra : alsoCompute) {
+            if (supportedHashes().contains(extra) && !requested.contains(extra)) {
+                requested.append(extra);
+            }
+        }
+        computedHashes = calculateFileHashes(filePath, requested, std::move(progressCallback), cancelToken);
+        computedHash = computedHashes.value(algorithm);
     } catch (const HashCancelledException&) {
         return {
             VerificationStatus::Cancelled,
@@ -488,6 +542,7 @@ VerificationResult verifyChecksum(
             QStringLiteral("Checksum calculated. Paste or import an official checksum to verify integrity."),
             computedHash,
             std::nullopt,
+            computedHashes,
         };
     }
 
@@ -497,6 +552,7 @@ VerificationResult verifyChecksum(
             QStringLiteral("The ISO checksum matches the expected value."),
             computedHash,
             true,
+            computedHashes,
         };
     }
 
@@ -505,6 +561,7 @@ VerificationResult verifyChecksum(
         QStringLiteral("The ISO checksum does not match the expected value."),
         computedHash,
         false,
+        computedHashes,
     };
 }
 

@@ -16,12 +16,15 @@ class VerificationController : public QObject {
 
     bool isRunning() const { return running_; }
 
+    // Algorithms in alsoCompute are computed from the same read pass and returned
+    // in VerificationResult::computedHashes; only `algorithm` is verified.
     void start(
         const QString& filePath,
         const QString& expectedChecksum,
         const QString& algorithm,
         qint64 fileSize,
-        quint64 jobToken);
+        quint64 jobToken,
+        const QStringList& alsoCompute = {});
 
     void cancel();
 

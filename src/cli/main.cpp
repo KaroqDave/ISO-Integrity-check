@@ -15,9 +15,24 @@ struct CliOptions {
     QString filePath;
     QString expectedChecksum;
     QString checksumFilePath;
-    QString algorithm = QStringLiteral("SHA256");
+    QStringList algorithms;
+    bool algorithmExplicit = false;
     bool hashOnly = false;
 };
+
+// Accepts "SHA256" or "SHA256,SHA512". Order is preserved and duplicates dropped
+// so the first entry stays a predictable default for verification.
+QStringList parseAlgorithmList(const QString& value)
+{
+    QStringList algorithms;
+    for (const QString& part : value.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const QString name = part.trimmed().toUpper();
+        if (!name.isEmpty() && !algorithms.contains(name)) {
+            algorithms.append(name);
+        }
+    }
+    return algorithms;
+}
 
 int exitCodeForStatus(iso::VerificationStatus status)
 {
@@ -55,21 +70,28 @@ CliOptions parseOptions(QCoreApplication& app)
         QStringLiteral("path"));
     QCommandLineOption algorithmOption(
         QStringList{QStringLiteral("a"), QStringLiteral("algorithm")},
-        QStringLiteral("Hash algorithm (SHA256, SHA512, SHA1, MD5)."),
-        QStringLiteral("name"),
+        QStringLiteral("Hash algorithm, or a comma-separated list computed in a single read pass "
+                       "(SHA256, SHA512, SHA1, MD5)."),
+        QStringLiteral("names"),
         QStringLiteral("SHA256"));
+    QCommandLineOption allOption(
+        QStringList{QStringLiteral("A"), QStringLiteral("all")},
+        QStringLiteral("Compute every supported algorithm in a single read pass."));
 
     parser.addOption(fileOption);
     parser.addOption(expectedOption);
     parser.addOption(checksumFileOption);
     parser.addOption(algorithmOption);
+    parser.addOption(allOption);
     parser.process(app);
 
     CliOptions options;
     options.filePath = parser.value(fileOption);
     options.expectedChecksum = parser.value(expectedOption);
     options.checksumFilePath = parser.value(checksumFileOption);
-    options.algorithm = parser.value(algorithmOption).toUpper();
+    options.algorithms =
+        parser.isSet(allOption) ? iso::supportedHashNames() : parseAlgorithmList(parser.value(algorithmOption));
+    options.algorithmExplicit = parser.isSet(allOption) || parser.isSet(algorithmOption);
     options.hashOnly = !parser.isSet(expectedOption) && !parser.isSet(checksumFileOption);
     return options;
 }
@@ -88,7 +110,23 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    QString algorithm = options.algorithm;
+    QStringList algorithms = options.algorithms;
+    if (algorithms.isEmpty()) {
+        QTextStream(stderr) << "No hash algorithm was given to --algorithm.\n";
+        return 2;
+    }
+
+    // Reject typos up front. verifyChecksum silently ignores unknown names in its
+    // extras list, which would quietly drop "SHA51" from --algorithm SHA256,SHA51.
+    for (const QString& name : algorithms) {
+        if (!iso::supportedHashes().contains(name)) {
+            QTextStream(stderr) << "Unsupported hash algorithm: " << name << ". Supported: "
+                                << iso::supportedHashNames().join(QStringLiteral(", ")) << ".\n";
+            return 2;
+        }
+    }
+
+    QString algorithm = algorithms.first();
     QString expectedChecksum = options.expectedChecksum;
 
     if (!options.checksumFilePath.isEmpty()) {
@@ -96,24 +134,47 @@ int main(int argc, char* argv[])
             const auto parsed = iso::loadChecksumFile(options.checksumFilePath, options.filePath);
             algorithm = parsed.algorithm;
             expectedChecksum = parsed.checksum;
+            if (!algorithms.contains(algorithm)) {
+                algorithms.prepend(algorithm);
+            }
         } catch (const std::exception& error) {
             QTextStream(stderr) << error.what() << '\n';
             return 2;
         }
     } else if (
         const auto inferred = iso::algorithmFromChecksumLength(iso::normalizeChecksum(expectedChecksum).size())) {
-        // Auto-detect the algorithm from a pasted checksum's length when the user
-        // left the default (SHA256) selected.
-        if (options.algorithm == QStringLiteral("SHA256") && algorithm != *inferred) {
+        if (algorithms.contains(*inferred)) {
+            // Several algorithms were asked for and one matches the pasted
+            // checksum's length; verify against that one.
             algorithm = *inferred;
+        } else if (!options.algorithmExplicit) {
+            // Auto-detect the algorithm from a pasted checksum's length when the
+            // user left the default (SHA256) selected.
+            algorithm = *inferred;
+            algorithms = {*inferred};
         }
     }
 
-    const auto result = iso::verifyChecksum(options.filePath, expectedChecksum, algorithm);
+    const QStringList alsoCompute = algorithms.mid(algorithms.indexOf(algorithm) + 1) +
+                                    algorithms.mid(0, algorithms.indexOf(algorithm));
+    const auto result = iso::verifyChecksum(options.filePath, expectedChecksum, algorithm, {}, {}, alsoCompute);
+
     QTextStream out(stdout);
-    out << "Algorithm: " << algorithm << '\n';
-    if (!result.computedHash.isEmpty()) {
-        out << "Computed: " << result.computedHash << '\n';
+    if (algorithms.size() == 1) {
+        out << "Algorithm: " << algorithm << '\n';
+        if (!result.computedHash.isEmpty()) {
+            out << "Computed: " << result.computedHash << '\n';
+        }
+    } else {
+        for (const QString& name : algorithms) {
+            const QString computed = result.computedHashes.value(name);
+            if (!computed.isEmpty()) {
+                out << name << ": " << computed << '\n';
+            }
+        }
+        if (!options.hashOnly && !result.computedHash.isEmpty()) {
+            out << "Verified against: " << algorithm << '\n';
+        }
     }
 
     switch (result.status) {

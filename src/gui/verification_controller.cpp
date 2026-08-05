@@ -23,7 +23,8 @@ void VerificationController::start(
     const QString& expectedChecksum,
     const QString& algorithm,
     qint64 fileSize,
-    quint64 jobToken)
+    quint64 jobToken,
+    const QStringList& alsoCompute)
 {
     if (running_) {
         return;
@@ -34,7 +35,14 @@ void VerificationController::start(
     activeCancelToken_ = iso::makeCancelToken();
 
     auto* worker = QThread::create(
-        [this, filePath, expectedChecksum, algorithm, jobToken, fileSize, cancelToken = activeCancelToken_]() {
+        [this,
+         filePath,
+         expectedChecksum,
+         algorithm,
+         alsoCompute,
+         jobToken,
+         fileSize,
+         cancelToken = activeCancelToken_]() {
             iso::VerificationResult result;
             QElapsedTimer progressTimer;
             progressTimer.start();
@@ -67,7 +75,7 @@ void VerificationController::start(
                     };
 
                 result = iso::verifyChecksum(
-                    filePath, expectedChecksum, algorithm, std::move(progressCallback), cancelToken);
+                    filePath, expectedChecksum, algorithm, std::move(progressCallback), cancelToken, alsoCompute);
             } catch (const std::exception& error) {
                 result = {iso::VerificationStatus::Error, QString::fromUtf8(error.what()), {}, std::nullopt};
             }
