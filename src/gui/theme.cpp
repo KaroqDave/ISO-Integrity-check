@@ -38,7 +38,9 @@ Palette lightPalette()
     p.surfaceAlt = QColor("#eef2f9");
     p.border = QColor("#d5dce8");
     p.text = QColor("#1f2937");
-    p.mutedText = QColor("#64748b");
+    // #64748b was 4.40:1 against the page background, under the 4.5:1 WCAG AA
+    // floor for the subtitle and footer labels that sit outside a card.
+    p.mutedText = QColor("#5b6a80");
     p.accent = QColor("#2563eb");
     p.accentHover = QColor("#1d4ed8");
     p.accentPressed = QColor("#1e40af");

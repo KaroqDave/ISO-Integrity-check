@@ -94,7 +94,13 @@ endif()
 
 if(WIN32)
     target_link_libraries(iso-integrity-check PRIVATE bcrypt)
-    target_sources(iso-integrity-check PRIVATE resources/app.rc)
+
+    # The Windows version resource is generated so PROJECT_VERSION stays the only
+    # place a release is bumped. The icon path is absolute because the generated
+    # .rc no longer sits next to resources/icons/.
+    set(ISO_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/app.ico")
+    configure_file(resources/app.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app.rc" @ONLY)
+    target_sources(iso-integrity-check PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app.rc")
 endif()
 
 if(WIN32)

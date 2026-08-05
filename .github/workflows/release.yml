@@ -9,7 +9,36 @@ permissions:
   contents: write
 
 jobs:
+  # The packaging scripts name their artifacts from PROJECT_VERSION, not from the
+  # tag. Without this gate, tagging v1.3.0 without bumping CMakeLists.txt would
+  # publish a "v1.3.0" release containing 1.2.0 files.
+  check-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify tag matches project version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # `|| true` keeps a non-matching grep from tripping `bash -e` before the
+          # explicit check below can report why.
+          project=$(grep -oEm1 'project[[:space:]]*\([^)]*VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          echo "Tag version:     $tag"
+          echo "Project version: $project"
+          if [ -z "$project" ]; then
+            echo "::error::Could not read PROJECT_VERSION from CMakeLists.txt."
+            exit 1
+          fi
+          if [ "$tag" != "$project" ]; then
+            echo "::error::Tag v$tag does not match PROJECT_VERSION $project in CMakeLists.txt. Bump the project version or retag."
+            exit 1
+          fi
+
   build-windows:
+    needs: check-version
     runs-on: windows-latest
 
     steps:
@@ -42,8 +71,10 @@ jobs:
         with:
           name: windows-release
           path: standalone/*.zip
+          if-no-files-found: error
 
   build-linux:
+    needs: check-version
     runs-on: ubuntu-22.04
 
     steps:
@@ -89,6 +120,7 @@ jobs:
         with:
           name: linux-release
           path: standalone/*.AppImage
+          if-no-files-found: error
 
   publish:
     needs: [build-windows, build-linux]
