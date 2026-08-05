@@ -4,7 +4,6 @@
 #include "gui/theme.h"
 
 #include <QApplication>
-#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -53,6 +52,12 @@ namespace {
 constexpr auto AppAuthor = "KaroqDave";
 constexpr auto AppProfileUrl = "https://github.com/KaroqDave";
 
+// Sentinel stored as the combo's item data for the "Auto" entry. It never
+// reaches the core, which only knows real algorithm names — MainWindow resolves
+// it to one before verifying.
+const QString AutoAlgorithm = QStringLiteral("AUTO");
+const QString DefaultAlgorithm = QStringLiteral("SHA256");
+
 QGroupBox* card(const QString& title)
 {
     auto* box = new QGroupBox(title);
@@ -98,6 +103,7 @@ QPushButton* styledButton(const QString& text, const char* variant)
 
 void setupAlgorithmCombo(QComboBox* combo)
 {
+    combo->addItem(QStringLiteral("Auto (all types)"), AutoAlgorithm);
     const auto hashes = iso::supportedHashes();
     for (const QString& name : iso::supportedHashNames()) {
         const iso::HashDetails& details = hashes.value(name);
@@ -402,21 +408,26 @@ QWidget* MainWindow::buildInputSection()
     algorithmCombo = new QComboBox();
     setupAlgorithmCombo(algorithmCombo);
     algorithmCombo->setAccessibleName(QStringLiteral("Hash type"));
+    algorithmCombo->setToolTip(QStringLiteral(
+        "Auto reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together,\n"
+        "verifying against whichever one matches the expected checksum's length.\n"
+        "Switching the hash type afterwards is instant instead of re-reading the file.\n"
+        "Pick a single type to spend less CPU when you only need one hash."));
     expectedEdit = new QLineEdit();
     expectedEdit->setPlaceholderText(QStringLiteral("Paste the expected checksum here"));
     expectedEdit->setAccessibleName(QStringLiteral("Expected checksum"));
     expectedEdit->setAccessibleDescription(QStringLiteral("Official checksum to compare against the computed hash"));
-    connect(expectedEdit, &QLineEdit::textChanged, this, [this]() { updateExpectedValidation(true); });
+    connect(expectedEdit, &QLineEdit::textChanged, this, [this]() {
+        updateExpectedValidation(true);
+        // Only Auto re-resolves as the text changes; a fixed hash type does not.
+        if (isAutoAlgorithm()) {
+            refreshComputedFromCache();
+        }
+    });
     connect(algorithmCombo, &QComboBox::currentTextChanged, this, &MainWindow::onAlgorithmChanged);
     expectedHintLabel = new QLabel;
     expectedHintLabel->setObjectName(QStringLiteral("footnote"));
     expectedHintLabel->setWordWrap(true);
-    computeAllCheckBox = new QCheckBox(QStringLiteral("Compute all hash types in one pass"));
-    computeAllCheckBox->setToolTip(QStringLiteral(
-        "Reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together.\n"
-        "Switching the hash type afterwards is instant instead of re-reading the file.\n"
-        "Uses more CPU, so leave it off if you only need one hash."));
-    computeAllCheckBox->setCursor(Qt::PointingHandCursor);
     importButton = styledButton(QStringLiteral("Import checksum file..."), "secondary");
     connect(importButton, &QPushButton::clicked, this, &MainWindow::browseChecksumFile);
     inputLayout->addWidget(fieldLabel(QStringLiteral("Hash type")), 0, 0);
@@ -425,8 +436,8 @@ QWidget* MainWindow::buildInputSection()
     inputLayout->addWidget(fieldLabel(QStringLiteral("Expected checksum")), 1, 0);
     inputLayout->addWidget(expectedEdit, 1, 1, 1, 2);
     inputLayout->addWidget(expectedHintLabel, 2, 1, 1, 2);
-    inputLayout->addWidget(computeAllCheckBox, 3, 1, 1, 2);
     inputLayout->setColumnStretch(1, 1);
+    setAlgorithm(DefaultAlgorithm);
     return inputSection;
 }
 
@@ -596,7 +607,11 @@ void MainWindow::importChecksumFile(const QString& path)
 {
     try {
         const auto parsed = iso::loadChecksumFile(path, fileEdit->text().isEmpty() ? QString{} : fileEdit->text());
-        setAlgorithm(parsed.algorithm);
+        // Auto already resolves to whatever the import turned up, so an import
+        // must not quietly drag the user off their Auto selection.
+        if (!isAutoAlgorithm()) {
+            setAlgorithm(parsed.algorithm);
+        }
         expectedEdit->setText(parsed.checksum);
 
         const QString source = QFileInfo(path).fileName();
@@ -631,7 +646,8 @@ void MainWindow::startVerification()
 {
     const QString filePath = fileEdit->text();
     const QString expectedChecksum = expectedEdit->text();
-    const QString algorithm = currentAlgorithm();
+    const bool computeAll = isAutoAlgorithm();
+    const QString algorithm = resolvedAlgorithm();
 
     if (filePath.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("ISO file"), QStringLiteral("Choose an ISO file first."));
@@ -651,13 +667,15 @@ void MainWindow::startVerification()
     }
 
     verificationFileSize = fileInfo.exists() ? fileInfo.size() : 0;
+    const QString algorithmLabel = computeAll ? QStringLiteral("all types") : algorithm;
     activeVerificationSummary = fileInfo.exists()
-                                    ? QStringLiteral("Verifying: %1 (%2)...").arg(fileInfo.fileName(), algorithm)
-                                    : QStringLiteral("Verifying selected file (%1)...").arg(algorithm);
+                                    ? QStringLiteral("Verifying: %1 (%2)...").arg(fileInfo.fileName(), algorithmLabel)
+                                    : QStringLiteral("Verifying selected file (%1)...").arg(algorithmLabel);
 
     const quint64 jobToken = nextJobToken();
     activeJobToken = jobToken;
     activeExpectedChecksum = expectedChecksum;
+    activeAlgorithm = algorithm;
 
     setRunning(true);
     setStatus(iso::VerificationStatus::Generated, activeVerificationSummary, QString());
@@ -679,8 +697,7 @@ void MainWindow::startVerification()
         progressBar->setFormat(QStringLiteral("Calculating..."));
     }
 
-    const QStringList alsoCompute =
-        (computeAllCheckBox && computeAllCheckBox->isChecked()) ? iso::supportedHashNames() : QStringList{};
+    const QStringList alsoCompute = computeAll ? iso::supportedHashNames() : QStringList{};
     verificationController.start(
         filePath, expectedChecksum, algorithm, verificationFileSize, jobToken, alsoCompute);
 }
@@ -745,9 +762,6 @@ void MainWindow::setRunning(bool running)
     expectedEdit->setEnabled(!running);
     computedEdit->setEnabled(!running);
     algorithmCombo->setEnabled(!running);
-    if (computeAllCheckBox) {
-        computeAllCheckBox->setEnabled(!running);
-    }
     browseIsoButton->setEnabled(!running);
     importButton->setEnabled(!running);
     clearButton->setEnabled(!running);
@@ -848,7 +862,7 @@ void MainWindow::clearAll()
     fileEdit->setToolTip({});
     expectedEdit->clear();
     computedEdit->clear();
-    algorithmCombo->setCurrentIndex(0);
+    setAlgorithm(DefaultAlgorithm);
     clearMismatchHighlight();
     updateExpectedValidation();
     setStatus(
@@ -937,7 +951,9 @@ void MainWindow::updateExpectedValidation(bool autoDetectAlgorithm)
         return;
     }
 
-    if (autoDetectAlgorithm) {
+    // Auto already adapts to whatever was pasted, so switching the combo away
+    // from it would silently undo the user's choice.
+    if (autoDetectAlgorithm && !isAutoAlgorithm()) {
         if (const auto detected = iso::algorithmFromChecksumLength(value.size())) {
             if (algorithmCombo && currentAlgorithm() != *detected) {
                 QSignalBlocker blocker(algorithmCombo);
@@ -946,18 +962,27 @@ void MainWindow::updateExpectedValidation(bool autoDetectAlgorithm)
         }
     }
 
-    const QString algorithm = currentAlgorithm();
+    const QString algorithm = resolvedAlgorithm();
+    const iso::ColorScheme scheme = iso::resolveColorScheme(currentTheme);
+    const iso::Palette& palette = iso::paletteFor(scheme);
+
     if (const auto error = iso::validateExpectedChecksum(value, algorithm)) {
-        const iso::ColorScheme scheme = iso::resolveColorScheme(currentTheme);
-        const iso::Palette& palette = iso::paletteFor(scheme);
-        expectedHintLabel->setText(*error);
+        // In Auto mode a wrong length means no hash type fits at all, which is
+        // more useful than naming the one Auto happened to fall back to. Any
+        // other complaint (non-hex characters) is reported as-is.
+        const bool lengthFitsSomeAlgorithm = iso::algorithmFromChecksumLength(value.size()).has_value();
+        expectedHintLabel->setText(
+            isAutoAlgorithm() && !lengthFitsSomeAlgorithm
+                ? QStringLiteral("No supported hash type has %1 characters. Expected 32, 40, 64, or 128.")
+                      .arg(value.size())
+                : *error);
         expectedHintLabel->setStyleSheet(QStringLiteral("color: %1;").arg(palette.statusError.name(QColor::HexRgb)));
         return;
     }
 
-    const iso::ColorScheme scheme = iso::resolveColorScheme(currentTheme);
-    const iso::Palette& palette = iso::paletteFor(scheme);
-    expectedHintLabel->setText(QStringLiteral("Checksum format looks valid for %1.").arg(algorithm));
+    expectedHintLabel->setText(
+        isAutoAlgorithm() ? QStringLiteral("Detected %1 from the checksum length.").arg(algorithm)
+                          : QStringLiteral("Checksum format looks valid for %1.").arg(algorithm));
     expectedHintLabel->setStyleSheet(QStringLiteral("color: %1;").arg(palette.statusMatch.name(QColor::HexRgb)));
 }
 
@@ -1055,6 +1080,27 @@ void MainWindow::setAlgorithm(const QString& algorithm)
     }
 }
 
+bool MainWindow::isAutoAlgorithm() const
+{
+    return currentAlgorithm() == AutoAlgorithm;
+}
+
+// The single algorithm an Auto selection currently stands for: whichever matches
+// the expected checksum's length, or SHA256 when there is nothing to infer from.
+QString MainWindow::resolvedAlgorithm() const
+{
+    const QString selected = currentAlgorithm();
+    if (selected != AutoAlgorithm) {
+        return selected;
+    }
+
+    const QString expected = iso::normalizeChecksum(expectedEdit ? expectedEdit->text() : QString{});
+    if (const auto inferred = iso::algorithmFromChecksumLength(expected.size())) {
+        return *inferred;
+    }
+    return DefaultAlgorithm;
+}
+
 QString MainWindow::currentFileIdentity() const
 {
     const QString path = fileEdit ? fileEdit->text() : QString{};
@@ -1094,6 +1140,33 @@ void MainWindow::clearHashCache()
     cachedHashes.clear();
 }
 
+QString MainWindow::cachedHashForSelection() const
+{
+    const QString identity = currentFileIdentity();
+    if (identity.isEmpty() || identity != cachedFileIdentity) {
+        return {};
+    }
+    return cachedHashes.value(resolvedAlgorithm());
+}
+
+// Keeps the Computed field pointing at whatever the current selection resolves
+// to. Under Auto that changes as the expected checksum is edited, so this runs
+// on each keystroke — it deliberately does not re-render a match verdict, which
+// would flicker while a checksum is being typed.
+void MainWindow::refreshComputedFromCache()
+{
+    if (verificationRunning || !computedEdit) {
+        return;
+    }
+
+    const QString cached = cachedHashForSelection();
+    if (cached == computedEdit->text()) {
+        return;
+    }
+    setComputedHash(cached);
+    clearMismatchHighlight();
+}
+
 void MainWindow::onAlgorithmChanged()
 {
     updateExpectedValidation(false);
@@ -1105,10 +1178,8 @@ void MainWindow::onAlgorithmChanged()
     // The computed field belongs to whichever algorithm produced it. Showing a
     // SHA256 digest under a SHA512 label would be actively misleading, so either
     // swap in the cached value for the newly selected algorithm or blank it.
-    const QString algorithm = currentAlgorithm();
-    const QString identity = currentFileIdentity();
-    const bool cacheApplies = !identity.isEmpty() && identity == cachedFileIdentity;
-    const QString cached = cacheApplies ? cachedHashes.value(algorithm) : QString{};
+    const QString algorithm = resolvedAlgorithm();
+    const QString cached = cachedHashForSelection();
 
     if (cached.isEmpty()) {
         if (computedEdit && !computedEdit->text().isEmpty()) {
@@ -1158,7 +1229,9 @@ void MainWindow::onAlgorithmChanged()
 
 QString MainWindow::resultDetail(const iso::VerificationResult& result) const
 {
-    const QString algorithm = currentAlgorithm();
+    // The algorithm the finished run actually used, which under an Auto selection
+    // is not what currentAlgorithm() reports.
+    const QString algorithm = activeAlgorithm.isEmpty() ? resolvedAlgorithm() : activeAlgorithm;
     switch (result.status) {
     case iso::VerificationStatus::Generated:
         return QStringLiteral("Computed %1. Import or paste an official checksum to compare.").arg(algorithm);

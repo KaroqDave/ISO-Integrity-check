@@ -12,7 +12,6 @@
 #include <QStringList>
 #include <QUrl>
 
-class QCheckBox;
 class QCloseEvent;
 class QComboBox;
 class QDragEnterEvent;
@@ -88,7 +87,11 @@ class MainWindow : public QMainWindow {
     QString currentAlgorithm() const;
     void setAlgorithm(const QString& algorithm);
     void onAlgorithmChanged();
+    bool isAutoAlgorithm() const;
+    QString resolvedAlgorithm() const;
     QString currentFileIdentity() const;
+    QString cachedHashForSelection() const;
+    void refreshComputedFromCache();
     void cacheComputedHashes(const QHash<QString, QString>& hashes);
     void clearHashCache();
     quint64 nextJobToken();
@@ -112,7 +115,6 @@ class MainWindow : public QMainWindow {
     QLabel* detailLabel = nullptr;
     QLabel* expectedHintLabel = nullptr;
     QTextEdit* mismatchDetailView = nullptr;
-    QCheckBox* computeAllCheckBox = nullptr;
     QGroupBox* fileSection = nullptr;
     QGroupBox* inputSection = nullptr;
 
@@ -133,6 +135,9 @@ class MainWindow : public QMainWindow {
     qint64 verificationFileSize = 0;
     QString activeVerificationSummary;
     QString activeExpectedChecksum;
+    // The algorithm the running or last-finished job used. Under an Auto
+    // selection this is the resolved name, not the combo's "AUTO" sentinel.
+    QString activeAlgorithm;
 
     QElapsedTimer progressElapsedTimer;
     qint64 lastProgressBytes = 0;
