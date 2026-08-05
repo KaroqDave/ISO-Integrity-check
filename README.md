@@ -13,21 +13,23 @@ Built with C++ and Qt 6, with a matching headless CLI for scripting.
 
 ![ISO Integrity Check](docs/screenshot.png)
 
-## What's New in 1.3.1
+## What's New in 1.4.0
 
-- **Auto is now the default hash type.** Nothing to choose before verifying: paste the vendor's checksum and the app works out which algorithm it belongs to.
-- **Auto now computes one digest, not four.** Every hash type has a distinct checksum length, so a pasted checksum identifies its algorithm outright — 1.3.0 hashed all four anyway. Verifying under Auto is now as fast as picking the type by hand, which for a large ISO is roughly four times quicker than 1.3.0.
-- **With no checksum pasted, Auto computes SHA256 and SHA512** in a single read, so a checksum pasted after the run usually verifies straight from the cache.
-- **Behaviour change from 1.3.0:** switching the hash type after a run is no longer always instant. Auto now computes only what it needs, so a type it skipped requires a fresh run. Types computed earlier stay cached for as long as the file is unchanged.
+- **Several hash types now cost about as much as the slowest one.** Each digest runs on its own core, so a run is bounded by the slowest algorithm rather than the sum of them all. On a 4 GiB ISO, SHA256 + SHA512 is about 1.3x quicker than 1.3.1 and all four types about 2.7x. Auto with no checksum pasted computes SHA256 and SHA512 for roughly the price of SHA512 alone.
+- **A quicker read path.** Read buffers are reused instead of reallocated for every chunk, and more of the file is kept in flight ahead of the digests. Worth a few percent on a single hash type, on top of the above.
+- **New option: bypass the system file cache.** Under **Options** in the app, or `--unbuffered` on the CLI. Verifying a large ISO normally fills the operating system's cache with several gigabytes that will never be read again, pushing out whatever else was in it. This reads past that cache instead. It is slightly slower for a file that is still cached — the usual case right after a download — so it is off by default. See [Performance](#performance).
+- **New `iso-hash-bench` tool** for anyone building from source, reporting whether hashing on a given machine and drive is limited by the disk or by the digest.
+
+Hash values are unchanged, and so is everything about how verification behaves. This release is about how long it takes.
 
 See the [full release notes](https://github.com/KaroqDave/ISO-Integrity-check/releases/latest) for everything else.
 
-### Previously, in 1.3.0
+### Previously, in 1.3.1
 
-- **Single-pass multi-algorithm hashing** throughout the core, so several digests cost one read instead of one read each. In the CLI: `--all`, or a comma-separated `--algorithm SHA256,SHA512`.
-- **Truncated reads are now detected.** A drive that returns zero bytes without reporting an error — removable media pulled mid-read, a dropped network share — no longer yields the digest of a partial file presented as a valid result.
-- **Sturdier error handling.** I/O failures are reported instead of thrown; the CLI previously terminated on an uncaught exception for cases such as a permission-denied file.
-- **Interface fixes.** Changing the hash type, or selecting a different ISO, no longer leaves the previous digest on screen under the new label. Light-theme secondary text now meets WCAG AA contrast.
+- **Auto is now the default hash type.** Nothing to choose before verifying: paste the vendor's checksum and the app works out which algorithm it belongs to.
+- **Auto computes one digest, not four.** Every hash type has a distinct checksum length, so a pasted checksum identifies its algorithm outright — 1.3.0 hashed all four anyway. Verifying under Auto is as fast as picking the type by hand, which for a large ISO is roughly four times quicker than 1.3.0.
+- **With no checksum pasted, Auto computes SHA256 and SHA512** in a single read, so a checksum pasted after the run usually verifies straight from the cache.
+- **Behaviour change from 1.3.0:** switching the hash type after a run is no longer always instant. Auto computes only what it needs, so a type it skipped requires a fresh run. Types computed earlier stay cached for as long as the file is unchanged.
 
 ## Features
 
@@ -36,8 +38,8 @@ See the [full release notes](https://github.com/KaroqDave/ISO-Integrity-check/re
 - **Smart checksum input**: pasted checksums are validated as you type, the algorithm is auto-detected from the checksum length, and mismatches highlight all differing characters in a side-by-side comparison panel below the result.
 - **Import checksum files** in plain, GNU, and BSD styles (`*.sha256`, `*.sha512`, `*.sha1`, `*.md5`, `*.txt`, `*SUMS`), automatically picking the line that matches the selected ISO.
 - **Drag and drop** an ISO or checksum file straight onto the matching section.
-- **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback.
-- **Light, dark, and system themes**, and it remembers your window, theme, and last-used folders between runs.
+- **SHA256, SHA512, SHA1, and MD5**, with native hashing via Windows CNG (BCrypt), OpenSSL when available on Linux/Unix, and Qt's `QCryptographicHash` as a fallback. Asking for more than one reads the file once and computes the digests side by side, so the cost is the slowest algorithm rather than the total.
+- **Light, dark, and system themes**, and it remembers your window, theme, last-used folders, and cache preference between runs.
 - **Headless CLI** (`iso-integrity-check-cli`) that shares the same core for scripting and automation.
 - **Cross-platform**: native Windows build and a portable Linux AppImage.
 
