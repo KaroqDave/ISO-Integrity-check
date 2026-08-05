@@ -56,7 +56,8 @@ constexpr auto AppProfileUrl = "https://github.com/KaroqDave";
 // reaches the core, which only knows real algorithm names — MainWindow resolves
 // it to one before verifying.
 const QString AutoAlgorithm = QStringLiteral("AUTO");
-const QString DefaultAlgorithm = QStringLiteral("SHA256");
+// What Auto stands for until an expected checksum gives its length away.
+const QString AutoFallbackAlgorithm = QStringLiteral("SHA256");
 
 QGroupBox* card(const QString& title)
 {
@@ -103,7 +104,7 @@ QPushButton* styledButton(const QString& text, const char* variant)
 
 void setupAlgorithmCombo(QComboBox* combo)
 {
-    combo->addItem(QStringLiteral("Auto (all types)"), AutoAlgorithm);
+    combo->addItem(QStringLiteral("Auto (detect from checksum)"), AutoAlgorithm);
     const auto hashes = iso::supportedHashes();
     for (const QString& name : iso::supportedHashNames()) {
         const iso::HashDetails& details = hashes.value(name);
@@ -409,10 +410,11 @@ QWidget* MainWindow::buildInputSection()
     setupAlgorithmCombo(algorithmCombo);
     algorithmCombo->setAccessibleName(QStringLiteral("Hash type"));
     algorithmCombo->setToolTip(QStringLiteral(
-        "Auto reads the ISO once and computes SHA256, SHA512, SHA1, and MD5 together,\n"
-        "verifying against whichever one matches the expected checksum's length.\n"
-        "Switching the hash type afterwards is instant instead of re-reading the file.\n"
-        "Pick a single type to spend less CPU when you only need one hash."));
+        "Auto reads the expected checksum's length to pick the hash type for you, so\n"
+        "you do not need to know which one the vendor published — and computes only\n"
+        "that type, at the speed of picking it yourself.\n"
+        "With no checksum pasted it computes SHA256 and SHA512, so one pasted after\n"
+        "the run usually verifies without re-reading the file."));
     expectedEdit = new QLineEdit();
     expectedEdit->setPlaceholderText(QStringLiteral("Paste the expected checksum here"));
     expectedEdit->setAccessibleName(QStringLiteral("Expected checksum"));
@@ -437,7 +439,9 @@ QWidget* MainWindow::buildInputSection()
     inputLayout->addWidget(expectedEdit, 1, 1, 1, 2);
     inputLayout->addWidget(expectedHintLabel, 2, 1, 1, 2);
     inputLayout->setColumnStretch(1, 1);
-    setAlgorithm(DefaultAlgorithm);
+    // Auto is the default because it needs no prior knowledge of which hash the
+    // download's checksum is: it computes them all and picks the one that fits.
+    setAlgorithm(AutoAlgorithm);
     return inputSection;
 }
 
@@ -646,8 +650,9 @@ void MainWindow::startVerification()
 {
     const QString filePath = fileEdit->text();
     const QString expectedChecksum = expectedEdit->text();
-    const bool computeAll = isAutoAlgorithm();
+    const bool autoSelected = isAutoAlgorithm();
     const QString algorithm = resolvedAlgorithm();
+    const QStringList autoSet = autoSelected ? autoHashSet() : QStringList{};
 
     if (filePath.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("ISO file"), QStringLiteral("Choose an ISO file first."));
@@ -667,7 +672,7 @@ void MainWindow::startVerification()
     }
 
     verificationFileSize = fileInfo.exists() ? fileInfo.size() : 0;
-    const QString algorithmLabel = computeAll ? QStringLiteral("all types") : algorithm;
+    const QString algorithmLabel = autoSelected ? autoSet.join(QStringLiteral(" + ")) : algorithm;
     activeVerificationSummary = fileInfo.exists()
                                     ? QStringLiteral("Verifying: %1 (%2)...").arg(fileInfo.fileName(), algorithmLabel)
                                     : QStringLiteral("Verifying selected file (%1)...").arg(algorithmLabel);
@@ -697,9 +702,8 @@ void MainWindow::startVerification()
         progressBar->setFormat(QStringLiteral("Calculating..."));
     }
 
-    const QStringList alsoCompute = computeAll ? iso::supportedHashNames() : QStringList{};
     verificationController.start(
-        filePath, expectedChecksum, algorithm, verificationFileSize, jobToken, alsoCompute);
+        filePath, expectedChecksum, algorithm, verificationFileSize, jobToken, autoSet);
 }
 
 void MainWindow::cancelVerification()
@@ -862,7 +866,7 @@ void MainWindow::clearAll()
     fileEdit->setToolTip({});
     expectedEdit->clear();
     computedEdit->clear();
-    setAlgorithm(DefaultAlgorithm);
+    setAlgorithm(AutoAlgorithm);
     clearMismatchHighlight();
     updateExpectedValidation();
     setStatus(
@@ -1085,6 +1089,15 @@ bool MainWindow::isAutoAlgorithm() const
     return currentAlgorithm() == AutoAlgorithm;
 }
 
+// The one algorithm the expected checksum's length names, when it names one.
+// Every hash type has a distinct hex length, so a pasted checksum identifies its
+// algorithm outright — this is what makes an Auto selection concrete.
+std::optional<QString> MainWindow::inferredAlgorithm() const
+{
+    const QString expected = iso::normalizeChecksum(expectedEdit ? expectedEdit->text() : QString{});
+    return iso::algorithmFromChecksumLength(expected.size());
+}
+
 // The single algorithm an Auto selection currently stands for: whichever matches
 // the expected checksum's length, or SHA256 when there is nothing to infer from.
 QString MainWindow::resolvedAlgorithm() const
@@ -1093,12 +1106,31 @@ QString MainWindow::resolvedAlgorithm() const
     if (selected != AutoAlgorithm) {
         return selected;
     }
+    return inferredAlgorithm().value_or(AutoFallbackAlgorithm);
+}
 
-    const QString expected = iso::normalizeChecksum(expectedEdit ? expectedEdit->text() : QString{});
-    if (const auto inferred = iso::algorithmFromChecksumLength(expected.size())) {
-        return *inferred;
+// The algorithms an Auto run computes in its single read pass. Auto spares the
+// user from knowing which algorithm the vendor published; it does not have to
+// spend a digest on the ones already ruled out. A pasted checksum names its
+// algorithm outright, so that is the only one worth computing. resolvedAlgorithm()
+// is a member of the set either way.
+QStringList MainWindow::autoHashSet() const
+{
+    if (const auto inferred = inferredAlgorithm()) {
+        return {*inferred};
     }
-    return DefaultAlgorithm;
+
+    // Nothing pasted to infer from. The non-legacy pair is the hedge: it costs a
+    // second digest now so that a checksum pasted after the run usually verifies
+    // against the cache instead of re-reading a multi-gigabyte file.
+    const auto& hashes = iso::supportedHashes();
+    QStringList names;
+    for (const QString& name : iso::supportedHashNames()) {
+        if (!hashes.value(name).legacy) {
+            names.append(name);
+        }
+    }
+    return names;
 }
 
 QString MainWindow::currentFileIdentity() const

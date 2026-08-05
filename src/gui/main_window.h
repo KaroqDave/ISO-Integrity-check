@@ -12,6 +12,8 @@
 #include <QStringList>
 #include <QUrl>
 
+#include <optional>
+
 class QCloseEvent;
 class QComboBox;
 class QDragEnterEvent;
@@ -88,7 +90,9 @@ class MainWindow : public QMainWindow {
     void setAlgorithm(const QString& algorithm);
     void onAlgorithmChanged();
     bool isAutoAlgorithm() const;
+    std::optional<QString> inferredAlgorithm() const;
     QString resolvedAlgorithm() const;
+    QStringList autoHashSet() const;
     QString currentFileIdentity() const;
     QString cachedHashForSelection() const;
     void refreshComputedFromCache();
