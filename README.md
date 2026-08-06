@@ -136,6 +136,16 @@ clangd resolves Qt and MSVC headers from a `compile_commands.json` file. On Linu
 
 It writes `compile_commands.json` to the repo root; reload the editor window afterwards.
 
+### Regenerating the README screenshot
+
+The hero image at the top of this file is produced from a real window capture, not composed by hand:
+
+```powershell
+./scripts/capture-screenshot.ps1
+```
+
+It launches the built app, captures the window, trims the dead space below the footer, and composites it on the padded gradient at 1432x1180, overwriting `docs/screenshot.png`. Run it with nothing selected in the app, and leave the window at its default size — the script stops with an explanation rather than producing a distorted or clipped image if the proportions no longer fit. Pass `-QtBin` if the Qt runtime is not already beside the executable.
+
 ### Headless CLI
 
 The C++ CLI reuses the same core hashing and parsing logic:
