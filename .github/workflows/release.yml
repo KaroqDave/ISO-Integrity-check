@@ -9,16 +9,18 @@ permissions:
   contents: write
 
 jobs:
-  # The packaging scripts name their artifacts from PROJECT_VERSION, not from the
-  # tag. Without this gate, tagging v1.3.0 without bumping CMakeLists.txt would
-  # publish a "v1.3.0" release containing 1.2.0 files.
-  check-version:
+  # Both gates run before the builds so a bad tag fails in seconds rather than
+  # after several minutes of compiling.
+  preflight:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # The packaging scripts name their artifacts from PROJECT_VERSION, not from
+      # the tag. Without this gate, tagging v1.3.0 without bumping CMakeLists.txt
+      # would publish a "v1.3.0" release containing 1.2.0 files.
       - name: Verify tag matches project version
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -37,8 +39,43 @@ jobs:
             exit 1
           fi
 
+      # The release body comes from the README so the two cannot drift. Both
+      # heading forms are accepted: a release re-run after the README has moved
+      # on to a later version finds its notes demoted to "Previously, in X.Y.Z".
+      - name: Extract release notes from the README
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v cur="## What's New in ${version}" -v prev="### Previously, in ${version}" '
+            !capture && ($0 == cur || $0 == prev) { capture = 1; next }
+            capture && /^```/         { fence = !fence }
+            capture && !fence && /^#/ { exit }
+            capture && !fence && /^See the \[full release notes\]/ { exit }
+            capture                   { buf = buf $0 "\n" }
+            END { sub(/^\n+/, "", buf); sub(/\n+$/, "\n", buf); printf "%s", buf }
+          ' README.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "::error::README.md has no \"What's New in $version\" section. Write the release notes before tagging."
+            exit 1
+          fi
+
+          # README-relative anchors resolve to nothing on a release page.
+          sed -i "s|](#|](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}#|g" release-notes.md
+
+          echo "Release notes for $version:"
+          echo "---"
+          cat release-notes.md
+          echo "---"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
   build-windows:
-    needs: check-version
+    needs: preflight
     runs-on: windows-latest
 
     steps:
@@ -74,7 +111,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    needs: check-version
+    needs: preflight
     runs-on: ubuntu-22.04
 
     steps:
@@ -138,4 +175,7 @@ jobs:
           files: |
             artifacts/windows-release/**
             artifacts/linux-release/**
+          # The README notes become the body; generate_release_notes appends the
+          # commit list and compare link underneath, as it did on its own before.
+          body_path: artifacts/release-notes/release-notes.md
           generate_release_notes: true
